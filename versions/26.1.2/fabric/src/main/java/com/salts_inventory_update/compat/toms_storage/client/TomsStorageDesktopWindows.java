@@ -155,7 +155,7 @@ public final class TomsStorageDesktopWindows {
 
         @Override
         public Component title(DesktopWindowContext<AbstractContainerMenu, TerminalState> context) {
-            return Component.literal(this.crafting ? "Crafting Terminal" : "Storage Terminal");
+            return Component.translatable(this.crafting ? "menu.toms_storage.crafting_terminal" : "menu.toms_storage.storage_terminal");
         }
 
         @Override
@@ -519,7 +519,7 @@ public final class TomsStorageDesktopWindows {
         }
 
         private void renderCraftingArea(DesktopRenderContext<AbstractContainerMenu, TerminalState> context, int x, int y) {
-            context.text(Component.literal("Craft"), x, y - 10, 0x404040, false);
+            context.text(Component.translatable("menu.toms_storage.crafting_terminal"), x, y - 10, 0x404040, false);
             renderRecipeBookButton(context, this.craftingRecipeBookButtonX(context), this.craftingRecipeBookButtonY(context));
             for (int i = 0; i < 9; i++) {
                 context.slot(i + 1, x + CRAFTING_TERMINAL_CRAFT_INPUT_X + i % 3 * SLOT, y + CRAFTING_TERMINAL_CRAFT_INPUT_Y + i / 3 * SLOT);
@@ -644,7 +644,7 @@ public final class TomsStorageDesktopWindows {
                 int warningY = this.crafting
                     ? this.craftingAreaY(context) + CRAFTING_TERMINAL_CRAFT_HEIGHT + 4
                     : gridY + gridHeight + 4;
-                context.text(Component.literal("Large network truncated"), x, warningY, 0xFFAA00, false);
+                context.text(Component.translatable("warn.salts_inventory_update.toms.truncated"), x, warningY, 0xFFAA00, false);
             }
             renderTerminalSearchPopup(context, state, this.terminalControlsX(context), y);
         }
@@ -801,7 +801,7 @@ public final class TomsStorageDesktopWindows {
         public void render(DesktopRenderContext<AbstractContainerMenu, Void> context) {
             int x = context.contentX() + 34;
             int y = context.contentY() + 24;
-            context.text(Component.literal("Connector Filter"), context.contentX() + PAD, context.contentY() + PAD, 0x404040, false);
+            context.text(Component.translatable("item.toms_storage.item_filter"), context.contentX() + PAD, context.contentY() + PAD, 0x404040, false);
             context.slotBackground(x, y);
             context.slot(0, x, y);
             int bx = context.contentX() + PAD;
@@ -862,7 +862,7 @@ public final class TomsStorageDesktopWindows {
             int count = TomsStorageReflect.intField(context.menu(), "count", 0);
             boolean lessThan = TomsStorageReflect.booleanField(context.menu(), "lessThan", false);
             context.slot(0, x, y + 24);
-            context.text(Component.literal(lessThan ? "Emit below" : "Emit above"), x + 28, y + 10, 0x404040, false);
+            context.text(Component.translatable(lessThan ? "tooltip.toms_storage.level_emitter.greater_than" : "tooltip.toms_storage.level_emitter.less_than"), x + 28, y + 10, 0x404040, false);
             context.fill(x + 28, y + 25, x + 112, y + 38, 0xFF8F8F8F);
             context.text(Integer.toString(count), x + 32, y + 28, 0xFFFFFF, false);
             renderCycleButton(context, x + 116, y + 24, TomsStorageCompat.id(lessThan ? "icons/less_than" : "icons/greater_than"), lessThan);
@@ -926,7 +926,7 @@ public final class TomsStorageDesktopWindows {
             InventoryLinkState state = context.state();
             int x = context.contentX() + PAD;
             int y = context.contentY() + PAD;
-            context.text(Component.literal("Beacon " + TomsStorageReflect.intField(context.menu(), "beaconLvl", 0)), x, y, 0x404040, false);
+            context.text(Component.translatable("block.minecraft.beacon" + TomsStorageReflect.intField(context.menu(), "beaconLvl", 0)), x, y, 0x404040, false);
             state.nameBox.text(state.name);
             state.nameBox.focused(state.nameFocused);
             DesktopWidgets.renderTextBox(context, state.nameBox, x, y + 14, 106);

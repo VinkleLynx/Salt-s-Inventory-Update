@@ -107,8 +107,8 @@ final class RuntimeRecipeBrowserAccess implements RecipeBrowserAccess {
         List<IIngredientType<?>> types = new ArrayList<>(this.manager().getRegisteredIngredientTypes());
         types.sort(Comparator.comparing(IIngredientType::getUid));
         List<RecipeBrowserTab> tabs = new ArrayList<>();
-        tabs.add(new RecipeBrowserTab(FAVORITES_TAB_UID, Component.literal("Favorites"), null, RecipeBrowserTabKind.FAVORITES));
-        tabs.add(new RecipeBrowserTab(RECENT_TAB_UID, Component.literal("Recent"), null, RecipeBrowserTabKind.RECENT));
+        tabs.add(new RecipeBrowserTab(FAVORITES_TAB_UID, Component.translatable("jei.config.client.bookmarks"), null, RecipeBrowserTabKind.FAVORITES));
+        tabs.add(new RecipeBrowserTab(RECENT_TAB_UID, Component.translatable("jei.config.client.lookupHistory"), null, RecipeBrowserTabKind.RECENT));
         for (IIngredientType<?> type : types) {
             if (!this.hasIngredients(type)) {
                 continue;

@@ -519,7 +519,7 @@ public final class TomsStorageDesktopWindows {
         }
 
         private void renderCraftingArea(DesktopRenderContext<AbstractContainerMenu, TerminalState> context, int x, int y) {
-            context.text(Component.translatable("block.toms_storage.crafting_terminal"), x, y - 10, 0x404040, false);
+            context.text(Component.translatable("menu.toms_storage.crafting_terminal"), x, y - 10, 0x404040, false);
             renderRecipeBookButton(context, this.craftingRecipeBookButtonX(context), this.craftingRecipeBookButtonY(context));
             for (int i = 0; i < 9; i++) {
                 context.slot(i + 1, x + CRAFTING_TERMINAL_CRAFT_INPUT_X + i % 3 * SLOT, y + CRAFTING_TERMINAL_CRAFT_INPUT_Y + i / 3 * SLOT);

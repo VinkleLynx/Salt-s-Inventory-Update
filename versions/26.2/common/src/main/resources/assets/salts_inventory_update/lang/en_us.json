@@ -76,5 +76,9 @@
   "title.salts_inventory_update.character.hunger": "Hunger",
   "title.salts_inventory_update.character.exp": "XP",
   "title.salts_inventory_update.rei.recent": "Recent",
-  "warn.salts_inventory_update.toms.truncated": "Large network truncated"
+  "title.salts_inventory_update.rei.tagtree":"Tag Tree",
+  "message.salts_inventory_update.rei.tagtree.loading": "Loading Tag Tree...",
+  "warn.salts_inventory_update.toms.truncated": "Large network truncated",
+  "tooltip.salts_inventory_update.jei.recpie": "Recipe",
+  "tooltip.salts_inventory_update.jei.uses": "Uses"
 }

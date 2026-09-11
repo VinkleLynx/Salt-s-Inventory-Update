@@ -9504,7 +9504,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     }
 
     private void renderJeiRecipeHeader(GuiGraphicsExtractor graphics, InventoryWindow window, @Nullable RecipeBrowserCategory category, int mouseX, int mouseY) {
-        Component title = category == null ? Component.literal(window.jeiMode == RecipeBrowserMode.USES ? "Uses" : "Recipes") : category.title();
+        Component title = category == null ? Component.translatable(window.jeiMode == RecipeBrowserMode.USES ? "tooltip.salts_inventory_update.jei.uses" : "tooltip.salts_inventory_update.jei.recipe") : category.title();
         this.renderJeiRecipeNavigationRow(
             graphics,
             title.getString(),
