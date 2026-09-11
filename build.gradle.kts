@@ -203,6 +203,10 @@ subprojects {
         }
     }
 
+    tasks.withType<JavaCompile>().configureEach {
+        options.encoding = "UTF-8"
+    }
+
     tasks.withType<JavaExec>().configureEach {
         if (name == "runClient") {
             val runTask = this
