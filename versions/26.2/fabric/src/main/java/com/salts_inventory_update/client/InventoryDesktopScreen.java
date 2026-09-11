@@ -9266,7 +9266,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         boolean editing = this.editingJeiSearchWindow == window;
         boolean placeholder = query.isEmpty() && !editing;
         if (placeholder) {
-            graphics.text(this.font, this.fitText("Search", width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, this.fitText(Component.translatable("gui.recipebook.search_hint").getString(), width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -15293,7 +15293,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     }
 
     private enum InstructionsPage {
-        DESKTOP(
+        DESKTOP(//bruh wtf is this
             "Salt Desktop",
             List.of(
                 InstructionsSection.text(

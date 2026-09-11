@@ -333,7 +333,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private static final int JEI_SCROLLBAR_GAP = 3;
     private static final int JEI_SCROLLBAR_BACKGROUND_HEIGHT = JEI_GRID_ROWS * SLOT_SIZE;
     private static final int JEI_SCROLLBAR_TRACK_HEIGHT = JEI_SCROLLBAR_BACKGROUND_HEIGHT - SCROLLBAR_INSET * 2 - SCROLLBAR_THUMB_HEIGHT;
-    private static final Component JEI_TITLE = Component.literal("Recipe Browser");
+    private static final Component JEI_TITLE = Component.translatable("title.salts_inventory_update.jei");
     private static final int JEI_RECIPE_MIN_HEIGHT = 176;
     private static final int JEI_RECIPE_BORDER_PADDING = 6;
     private static final int JEI_RECIPE_MIN_PADDING = 4;
@@ -766,7 +766,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private static final int CREATIVE_TAB_ICON_OFFSET_BOTTOM = 7;
     private static final int CREATIVE_PICKED_STACK_SIZE = 64;
     private static final int CREATIVE_DROP_SLOT = -1;
-    private static final Component CREATIVE_TITLE = Component.literal("Creative");
+    private static final Component CREATIVE_TITLE = Component.translatable("title.salts_inventory_update.creative");
     private static final Component CREATIVE_DELETE_TOOLTIP = Component.translatable("inventory.binSlot");
     private static final Identifier MERCHANT_TRADE_ARROW_SPRITE = Identifier.withDefaultNamespace("container/villager/trade_arrow");
     private static final Identifier MERCHANT_TRADE_ARROW_OUT_OF_STOCK_SPRITE = Identifier.withDefaultNamespace("container/villager/trade_arrow_out_of_stock");
@@ -850,8 +850,8 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private static final int GHOST_ITEM_WASH = 0xC0D0D0D0;
     private static final int GHOST_BACKDROP = 0x40D0D0D0;
     private static int currentGuiTint = NORMAL_GUI_TINT;
-    private static final Component TITLE = Component.literal("Salt's Inventory Desktop");
-    private static final Component INSTRUCTIONS_TITLE = Component.literal("Salt's Inventory Help");
+    private static final Component TITLE = Component.translatable("title.salts_inventory_update");
+    private static final Component INSTRUCTIONS_TITLE = Component.translatable("title.salts_inventory_update.instructions");
     private static final int INSTRUCTIONS_WINDOW_WIDTH = 300;
     private static final int INSTRUCTIONS_WINDOW_HEIGHT = 190;
     private static final int INSTRUCTIONS_ICON_SIZE = 18;
@@ -3859,7 +3859,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             int windowHeight = inventoryWindowHeight(visibleRows);
             window = new InventoryWindow(
                 kind,
-                Component.literal("Inventory"),
+                Component.translatable("container.inventory"),
                 0,
                 0,
                 windowWidth,
@@ -3882,7 +3882,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         } else if (kind == WindowKind.CHARACTER) {
             window = new InventoryWindow(
                 kind,
-                Component.literal("Character"),
+                Component.translatable("title.salts_inventory_update.character"),
                 0,
                 0,
                 CHARACTER_WINDOW_WIDTH,
@@ -5442,7 +5442,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         int visibleRows = Math.max(INVENTORY_DEFAULT_VISIBLE_ROWS, Math.min(INVENTORY_MAX_AUTO_VISIBLE_ROWS, Math.max(1, totalRows)));
         boolean scrollbar = totalRows > visibleRows;
         return DesktopWindowSize.of(
-            Math.max(this.minimumTitleBarWidth(Component.literal("Inventory")), storageWindowWidth(INVENTORY_DEFAULT_COLUMNS, scrollbar)),
+            Math.max(this.minimumTitleBarWidth(Component.translatable("container.inventory")), storageWindowWidth(INVENTORY_DEFAULT_COLUMNS, scrollbar)),
             inventoryWindowHeight(visibleRows)
         );
     }
@@ -7057,7 +7057,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             return Component.translatable("merchant.trades");
         }
         if (menu instanceof SmithingMenu) {
-            return Component.literal("Smithing");
+            return Component.translatable("container.blast_furnace");
         }
         if (menu instanceof GrindstoneMenu) {
             return Component.translatable("block.minecraft.grindstone");
@@ -9215,7 +9215,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         boolean editing = this.editingJeiSearchWindow == window;
         boolean placeholder = query.isEmpty() && !editing;
         if (placeholder) {
-            graphics.text(this.font, this.fitText("Search", width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, this.fitText(Component.translatable("gui.recipebook.search_hint").getString(), width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -9453,7 +9453,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     }
 
     private void renderJeiRecipeHeader(GuiGraphicsExtractor graphics, InventoryWindow window, @Nullable RecipeBrowserCategory category, int mouseX, int mouseY) {
-        Component title = category == null ? Component.literal(window.jeiMode == RecipeBrowserMode.USES ? "Uses" : "Recipes") : category.title();
+        Component title = category == null ? Component.translatable(window.jeiMode == RecipeBrowserMode.USES ? "tooltip.salts_inventory_update.jei.uses" : "tooltip.salts_inventory_update.jei.recipe") : category.title();
         this.renderJeiRecipeNavigationRow(
             graphics,
             title.getString(),
@@ -14296,9 +14296,9 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         }
 
         FoodData food = player.getFoodData();
-        this.renderCharacterStatLine(graphics, x, y, "Health", Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth()));
-        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT, "Hunger", food.getFoodLevel() + "/20");
-        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT * 2, "XP", Integer.toString(player.experienceLevel));
+        this.renderCharacterStatLine(graphics, x, y, Component.translatable("title.salts_inventory_update.character.health").getString(), Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth()));
+        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT, Component.translatable("title.salts_inventory_update.character.hunger").getString(), food.getFoodLevel() + "/20");
+        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT * 2, Component.translatable("title.salts_inventory_update.character.exp").getString(), Integer.toString(player.experienceLevel));
     }
 
     private void renderCharacterStatLine(GuiGraphicsExtractor graphics, int x, int y, String label, String value) {
@@ -14594,7 +14594,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         if (jeiWindow != null && jeiWindow.jeiMode == RecipeBrowserMode.INGREDIENTS && this.sharedCarried.isEmpty()) {
             if (this.jeiDefaultTabButtonContains(jeiWindow, mouseX, mouseY)) {
                 boolean selectedDefault = !jeiWindow.jeiDefaultTabUid.isEmpty() && jeiWindow.jeiDefaultTabUid.equals(jeiWindow.jeiSelectedTabUid);
-                graphics.setTooltipForNextFrame(this.font, Component.literal(selectedDefault ? "Clear default recipe browser tab" : "Set as default recipe browser tab"), mouseX, mouseY);
+                graphics.setTooltipForNextFrame(this.font, Component.translatable(selectedDefault ? "config.salts_inventory_update.recipe_browser.clear" : "config.salts_inventory_update.recipe_browser.set"), mouseX, mouseY);
                 return;
             }
         }
@@ -14630,16 +14630,16 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             JeiRecipeTransferButtonHit transferHit = this.jeiRecipeTransferButtonAt(jeiWindow, mouseX, mouseY);
             if (transferHit != null) {
                 List<Component> tooltip = new ArrayList<>();
-                tooltip.add(Component.literal("Move items"));
+                tooltip.add(Component.translatable("jei.tooltip.transfer"));
                 if (!transferHit.availability().craftable()) {
-                    tooltip.add(Component.literal("Missing ingredients").withStyle(ChatFormatting.RED));
+                    tooltip.add(Component.translatable("jei.tooltip.error.recipe.transfer.missing").withStyle(ChatFormatting.RED));
                 }
                 graphics.setComponentTooltipForNextFrame(this.font, tooltip, mouseX, mouseY);
                 return;
             }
             JeiRecipeLayoutPlacement bookmarkedPlacement = this.jeiRecipeBookmarkButtonAt(jeiWindow, mouseX, mouseY);
             if (bookmarkedPlacement != null) {
-                Component tooltip = Component.literal(this.jeiAccess().isRecipeBookmarked(bookmarkedPlacement.recipe()) ? "Remove from favorites" : "Add to favorites");
+                Component tooltip = Component.translatable(this.jeiAccess().isRecipeBookmarked(bookmarkedPlacement.recipe()) ? "jei.tooltip.bookmarks.recipe.remove" : "jei.tooltip.bookmarks.recipe.add");
                 graphics.setTooltipForNextFrame(this.font, tooltip, mouseX, mouseY);
                 return;
             }

@@ -9266,7 +9266,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         boolean editing = this.editingJeiSearchWindow == window;
         boolean placeholder = query.isEmpty() && !editing;
         if (placeholder) {
-            graphics.text(this.font, this.fitText("Search", width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, this.fitText(Component.translatable("gui.recipebook.search_hint").getString(), width - 8), x + 4, y + 2, this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -14348,9 +14348,9 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         }
 
         FoodData food = player.getFoodData();
-        this.renderCharacterStatLine(graphics, x, y, "Health", Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth()));
-        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT, "Hunger", food.getFoodLevel() + "/20");
-        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT * 2, "XP", Integer.toString(player.experienceLevel));
+        this.renderCharacterStatLine(graphics, x, y, Component.translatable("title.salts_inventory_update.character.health").getString(), Math.round(player.getHealth()) + "/" + Math.round(player.getMaxHealth()));
+        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT, Component.translatable("title.salts_inventory_update.character.hunger").getString(), food.getFoodLevel() + "/20");
+        this.renderCharacterStatLine(graphics, x, y + CHARACTER_STATS_LINE_HEIGHT * 2, Component.translatable("title.salts_inventory_update.character.exp").getString(), Integer.toString(player.experienceLevel));
     }
 
     private void renderCharacterStatLine(GuiGraphicsExtractor graphics, int x, int y, String label, String value) {

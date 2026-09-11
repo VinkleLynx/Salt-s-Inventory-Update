@@ -82,13 +82,5 @@
   "message.salts_inventory_update.rei.tagtree.loading": "正在加载标签树",
   "warn.salts_inventory_update.toms.truncated": "大型网络已被截断",
   "tooltip.salts_inventory_update.jei.recpie": "配方",
-  "tooltip.salts_inventory_update.jei.uses": "用途",
-  "wtf": "",
-  "page.salts_inventory_update.instructions.desktop.title": "Salt Desktop",
-  "page.salts_inventory_update.instructions.desktop.text.1.1": "Welcome",
-  "page.salts_inventory_update.instructions.desktop.text.1.2": "Welcome to the new and improved inventory experience!",
-  "page.salts_inventory_update.instructions.desktop.text.1.3": "If you do not want to read this now, simply close this window.",
-  "page.salts_inventory_update.instructions.desktop.text.2.1": "What Changed",
-  "page.salts_inventory_update.instructions.desktop.text.2.2": "Your inventory and opened containers now appear as windows.",
-  "page.salts_inventory_update.instructions.desktop.text.2.3": "You can keep multiple windows open and move items between them for easier inventory management."
+  "tooltip.salts_inventory_update.jei.uses": "用途"
 }
