@@ -68,6 +68,8 @@
   "config.salts_inventory_update.recipe_browser.clear": "清除默认配方浏览器",
   "config.salts_inventory_update.recipe_browser.set": "设置为默认配方浏览器",
   "title.salts_inventory_update.jei": "配方浏览器",
+  "title.salts_inventory_update.jei.items": "物品",
+  "title.salts_inventory_update.jei.fluids": "流体",
   "title.salts_inventory_update.creative": "创造模式",
   "title.salts_inventory_update": "Salt's Inventory 桌面",
   "title.salts_inventory_update.instructions": "Salt's Inventory 帮助",

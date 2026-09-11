@@ -68,6 +68,8 @@
   "config.salts_inventory_update.recipe_browser.clear": "Clear default recipe browser tab",
   "config.salts_inventory_update.recipe_browser.set": "Set as default recipe browser tab",
   "title.salts_inventory_update.jei": "Recipe Browser",
+  "title.salts_inventory_update.jei.items": "Items",
+  "title.salts_inventory_update.jei.fluids": "Fluids",
   "title.salts_inventory_update.creative": "Creative",
   "title.salts_inventory_update": "Salt's Inventory Desktop",
   "title.salts_inventory_update.instructions": "Salt's Inventory Help",

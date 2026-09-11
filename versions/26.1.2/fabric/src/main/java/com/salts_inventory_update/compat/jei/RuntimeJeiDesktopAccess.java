@@ -1088,7 +1088,7 @@ final class RuntimeRecipeBrowserAccess implements RecipeBrowserAccess {
 
     private String titleFor(IIngredientType<?> type) {
         if (type == VanillaTypes.ITEM_STACK) {
-            return "Items";
+            return Component.translatable("title.salts_inventory_update.jei.items").getString();
         }
         String uid = type.getUid();
         int separator = uid.indexOf(':');
@@ -1096,7 +1096,7 @@ final class RuntimeRecipeBrowserAccess implements RecipeBrowserAccess {
             uid = uid.substring(separator + 1);
         }
         if (uid.contains("fluid")) {
-            return "Fluids";
+            return Component.translatable("title.salts_inventory_update.jei.fluids").getString();
         }
         String normalized = uid.replace('_', ' ').replace('-', ' ').trim();
         if (normalized.isEmpty()) {
