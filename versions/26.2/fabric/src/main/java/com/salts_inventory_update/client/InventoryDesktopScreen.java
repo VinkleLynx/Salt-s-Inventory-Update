@@ -15294,102 +15294,132 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
 
     private enum InstructionsPage {
         DESKTOP(//bruh wtf is this
-            "Salt Desktop",
+            Component.translatable("instructions.salts_inventory_update.desktop.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Welcome",
-                    "Welcome to the new and improved inventory experience!",
-                    "If you do not want to read this now, simply close this window."
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.2").getString()
                 ),
                 InstructionsSection.text(
-                    "What Changed",
-                    "Your inventory and opened containers now appear as windows.",
-                    "You can keep multiple windows open and move items between them for easier inventory management."
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Open Again",
-                    "Use /saltsinventory help to open this window again at any time."
+                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.1").getString()
                 )
             )
         ),
         CONTROLS(
-            "Main Controls",
+           Component.translatable("instructions.salts_inventory_update.control.title").getString(),
             List.of(
                 InstructionsSection.binds(
-                    "Open Windows",
-                    InstructionsLine.bind("E", "Open/Close Inventory"),
-                    InstructionsLine.bind("C", "Open/Close Armor and Crafting"),
-                    InstructionsLine.bind("H", "Open/Close Recipe Browser Window")
+                    Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
+                    InstructionsLine.bind(
+                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
+                    ),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
+                    ),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.jei").getString()
+                    )
                 ),
                 InstructionsSection.binds(
-                    "Desktop Control",
-                    InstructionsLine.bind("Hold E", "Close all Salt windows"),
-                    InstructionsLine.mouseFocus("Give the mouse to camera control, or use the hotbar with no windows open"),
-                    InstructionsLine.bind("Esc", "Close the Salt desktop")
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
+                    InstructionsLine.bind(
+                        Component.literal(
+                            Component.translatable("key.salts_inventory_update.hold").getString() +
+                            " " +
+                            Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
+                        ).getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
+                    ),
+                    InstructionsLine.mouseFocus(
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
+                    ),
+                    InstructionsLine.bind(
+                        "Esc",
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
+                    )
                 )
             )
         ),
         WINDOWS(
-            "Window Controls",
+            Component.translatable("instructions.salts_inventory_update.windows.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Move And Arrange",
-                    "Unlock a window to drag it around the screen and place it wherever feels best.",
-                    "If resizing is enabled in settings, supported windows can be resized by dragging their bottom-right corner."
+                    Component.translatable("instructions.salts_inventory_update.windows.move.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.windows.move.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.windows.move.2").getString()
                 ),
-                InstructionsSection.binds(
-                    "Title Buttons",
-                    InstructionsLine.control(WindowControl.FOCUS, "Focus: Shift-clicked items move directly into the focused window when possible."),
-                    InstructionsLine.control(WindowControl.PIN, "Pin: Saves this window's position for the next time it opens. Click to pin or unpin."),
-                    InstructionsLine.control(WindowControl.LOCK, "Lock: Prevents the window from being moved or resized. Click to lock or unlock."),
-                    InstructionsLine.control(WindowControl.LINK, "Link: Select another highlighted window to make linked windows open and close together."),
-                    InstructionsLine.control(WindowControl.MINIMIZE, "Minimize: Collapses the window into a title bar to keep your screen less cluttered."),
-                    InstructionsLine.control(WindowControl.CLOSE, "Close: Closes the window.")
+                InstructionsSection.binds(//this whole section disapper, why? //need more vertical spage
+                    Component.translatable("instructions.salts_inventory_update.windows.buttons.title").getString(),
+                    InstructionsLine.control(WindowControl.FOCUS, Component.translatable("instructions.salts_inventory_update.windows.buttons.focus").getString()),
+                    InstructionsLine.control(WindowControl.PIN, Component.translatable("instructions.salts_inventory_update.windows.buttons.pin").getString()),
+                    InstructionsLine.control(WindowControl.LOCK, Component.translatable("instructions.salts_inventory_update.windows.buttons.lock").getString()),
+                    InstructionsLine.control(WindowControl.LINK, Component.translatable("instructions.salts_inventory_update.windows.buttons.link").getString()),
+                    InstructionsLine.control(WindowControl.MINIMIZE, Component.translatable("instructions.salts_inventory_update.windows.buttons.minimize").getString()),
+                    InstructionsLine.control(WindowControl.CLOSE, Component.translatable("instructions.salts_inventory_update.windows.buttons.close").getString())
                 )
             )
         ),
         INVENTORY(
-            "Inventory Tools",
+            Component.translatable("instructions.salts_inventory_update.inventory.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Hotbar",
-                    "Move items in and out of your hotbar by dragging them between the hotbar and other inventory slots.",
-                    "Enable Return Hotbar to Inventory in settings to place it below Inventory and Creative and move the offhand slot into Character."
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Expandable Inventory",
-                    "If enabled in settings, you can spend XP levels to purchase extra inventory slots.",
-                    "Purchased slots stay with your player and behave like normal inventory storage."
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.2").getString()
                 )
             )
         ),
         JEI(
-            "Recipe Browser Window",
+            Component.translatable("instructions.salts_inventory_update.jei.title").getString(),
             List.of(
                 InstructionsSection.binds(
-                    "Open And Search",
-                    InstructionsLine.bind("H", "Open the recipe browser as a Salt window"),
-                    InstructionsLine.text("Search ingredients, recipes, uses, favorites, and recent items.")
+                    Component.translatable("instructions.salts_inventory_update.jei.search.title").getString(),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.jei.search.1").getString()
+                    ),
+                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.search.2").getString())
                 ),
                 InstructionsSection.binds(
-                    "Recipe Flow",
-                    InstructionsLine.binds(List.of("R", "U"), "Hover lookups for recipes and uses"),
-                    InstructionsLine.text("Move Items works with compatible Salt crafting windows.")
+                    Component.translatable("instructions.salts_inventory_update.jei.recipe.title").getString(),
+                    InstructionsLine.binds(
+                        List.of(
+                            "U",
+                            "R"
+                        ),
+                        Component.translatable("instructions.salts_inventory_update.jei.recipe.1").getString()
+                    ),
+                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.recipe.2").getString())
                 )
             )
         ),
         TOMS_STORAGE(
-            "Tom's Simple Storage",
+            Component.translatable("instructions.salts_inventory_update.toms.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Terminals",
-                    "Storage and crafting terminals open as Salt windows.",
-                    "Terminal search, sorting, and recipes stay inside the window."
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Supported Screens",
-                    "Filters, inventory links, level emitters, and filing cabinets",
-                    "use Salt layouts when Tom's Simple Storage is installed."
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.2").getString()
                 )
             )
         );
@@ -15398,15 +15428,33 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         private final List<InstructionsSection> sections;
         private static final List<InstructionsSection> CONTROLS_WITHOUT_JEI_SECTIONS = List.of(
             InstructionsSection.binds(
-                "Open Windows",
-                InstructionsLine.bind("E", "Open/Close Inventory"),
-                InstructionsLine.bind("C", "Open/Close Armor and Crafting")
+                Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
+                InstructionsLine.bind(
+                    Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
+                ),
+                InstructionsLine.bind(
+                    WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
+                )
             ),
             InstructionsSection.binds(
-                "Desktop Control",
-                InstructionsLine.bind("Hold E", "Close all Salt windows"),
-                InstructionsLine.mouseFocus("Give the mouse to camera control, or use the hotbar with no windows open"),
-                InstructionsLine.bind("Esc", "Close the Salt desktop")
+                Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
+                InstructionsLine.bind(
+                    Component.literal(
+                        Component.translatable("key.salts_inventory_update.hold").getString() +
+                        " " +
+                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
+                    ).getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
+                ),
+                InstructionsLine.mouseFocus(
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
+                ),
+                InstructionsLine.bind(
+                    "Esc",
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
+                )
             )
         );
 
