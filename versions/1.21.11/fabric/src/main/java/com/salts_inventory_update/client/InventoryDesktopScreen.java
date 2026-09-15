@@ -839,7 +839,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private static final int COLOR_SLOT_BORDER = 0xFF9AA3B2;
     private static final int COLOR_WINDOW_TITLE = 0xFF111111;
     private static final int COLOR_TEXT = 0xFFE8EDF5;
-    private static final int COLOR_MUTED_TEXT = 0xFFB3BDCC;
+    private static final int COLOR_MUTED_TEXT = 0xFF404040;
     private static final int COLOR_HOTBAR_HOVER = 0x44000000;
     private static final int LINK_MODE_ORIGIN_FILL = 0x3355FF77;
     private static final int LINK_MODE_ORIGIN_OUTLINE = 0xFF55FF77;
@@ -852,7 +852,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private static int currentGuiTint = NORMAL_GUI_TINT;
     private static final Component TITLE = Component.translatable("title.salts_inventory_update");
     private static final Component INSTRUCTIONS_TITLE = Component.translatable("title.salts_inventory_update.instructions");
-    private static final int INSTRUCTIONS_WINDOW_WIDTH = 300;
+    private static final int INSTRUCTIONS_WINDOW_WIDTH = 400;
     private static final int INSTRUCTIONS_WINDOW_HEIGHT = 190;
     private static final int INSTRUCTIONS_ICON_SIZE = 18;
     private static final int INSTRUCTIONS_INNER_PADDING = 8;
@@ -7698,7 +7698,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private void renderCreativeWindow(GuiGraphicsExtractor graphics, InventoryWindow window, int mouseX, int mouseY) {
         CreativeModeTab selectedTab = this.selectedCreativeTab(window);
         if (selectedTab == null) {
-            graphics.text(this.font, "No creative tabs", window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.no_creative_tabs").getString(), window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
         } else if (this.isCreativeInventoryTab(selectedTab)) {
             this.renderCreativeInventoryTab(graphics, window, mouseX, mouseY);
         } else {
@@ -9106,7 +9106,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         boolean hovered = enabled && contains(mouseX, mouseY, rect.x(), rect.y(), rect.width(), rect.height());
         Identifier sprite = enabled ? hovered ? INSTRUCTIONS_BUTTON_HIGHLIGHTED_SPRITE : INSTRUCTIONS_BUTTON_SPRITE : INSTRUCTIONS_BUTTON_DISABLED_SPRITE;
         this.blitSprite(graphics, sprite, rect.x(), rect.y(), rect.width(), rect.height());
-        graphics.centeredText(this.font, rect.direction() < 0 ? "Back" : "Next", rect.x() + rect.width() / 2, rect.y() + 6, this.uiColor(enabled ? COLOR_TEXT : COLOR_MUTED_TEXT));
+        graphics.centeredText(this.font, rect.direction() < 0 ? Component.translatable("instructions.salts_inventory_update.button.back").getString() : Component.translatable("instructions.salts_inventory_update.button.next").getString(), rect.x() + rect.width() / 2, rect.y() + 6, this.uiColor(enabled ? COLOR_TEXT : COLOR_MUTED_TEXT));
     }
 
     private @Nullable InstructionsNavButtonRect instructionsNavButtonAt(InventoryWindow window, double mouseX, double mouseY) {
@@ -9134,7 +9134,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     private void renderJeiWindow(GuiGraphicsExtractor graphics, InventoryWindow window, int mouseX, int mouseY) {
         RecipeBrowserAccess access = this.jeiAccess();
         if (!access.isAvailable()) {
-            graphics.text(this.font, "Recipe browser is not available", window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.unavailable").getString(), window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -9150,7 +9150,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
 
         RecipeBrowserTab selectedTab = this.selectedJeiTab(window, tabs);
         if (selectedTab == null) {
-            graphics.text(this.font, "No recipe browser tabs", window.contentX(), this.jeiGridY(window), this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.no_tab").getString(), window.contentX(), this.jeiGridY(window), this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -9171,7 +9171,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         }
 
         if (entries.isEmpty()) {
-            graphics.text(this.font, "No results", gridX + 4, gridY + 4, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.no_results").getString(), gridX + 4, gridY + 4, this.uiColor(COLOR_MUTED_TEXT), false);
         }
         this.renderJeiScrollbar(graphics, window, layout);
     }
@@ -9185,7 +9185,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
 
         RecipeBrowserView view = window.recipeBrowserView;
         if (view == null) {
-            graphics.text(this.font, "Recipe browser view is unavailable", x + 4, y + 4, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.view_unavailable").getString(), x + 4, y + 4, this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -9193,7 +9193,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             view.render(graphics, x, y, width, height, mouseX, mouseY, tickProgress);
         } catch (RuntimeException | LinkageError exception) {
             DesktopDebug.warn("client recipe browser view render failed desktop={} window={} reason={}", this.desktopId, window.debugName(), exception.toString());
-            graphics.text(this.font, "Unable to render tree", x + 4, y + 4, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.unable_render_tree").getString(), x + 4, y + 4, this.uiColor(COLOR_MUTED_TEXT), false);
         }
     }
 
@@ -9319,14 +9319,14 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         this.renderJeiRecipeHistoryButton(graphics, window, mouseX, mouseY);
 
         if (window.jeiFocusEntry == null || category == null) {
-            graphics.text(this.font, "No recipes found", panelX + JEI_RECIPE_BORDER_PADDING, panelY + JEI_RECIPE_HEADER_HEIGHT + 12, this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.no_recipe_found").getString(), panelX + JEI_RECIPE_BORDER_PADDING, panelY + JEI_RECIPE_HEADER_HEIGHT + 12, this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
         this.renderJeiRecipeStations(graphics, window, access, mouseX, mouseY);
         List<JeiRecipeLayoutPlacement> placements = this.visibleJeiRecipePlacements(window, category);
         if (placements.isEmpty()) {
-            graphics.text(this.font, "No recipes found", this.jeiRecipeLayoutAreaX(window), this.jeiRecipeLayoutAreaY(window), this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.no_recipe_found").getString(), this.jeiRecipeLayoutAreaX(window), this.jeiRecipeLayoutAreaY(window), this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -9340,7 +9340,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
                 }
             } catch (RuntimeException exception) {
                 DesktopDebug.warn("client JEI recipe render failed desktop={} window={} index={} reason={}", this.desktopId, window.debugName(), placement.index(), exception.toString());
-                graphics.text(this.font, "Recipe render failed", placement.x(), placement.y(), this.uiColor(COLOR_MUTED_TEXT), false);
+                graphics.text(this.font, Component.translatable("warn.salts_inventory_update.jei.recipe_render_fail").getString(), placement.x(), placement.y(), this.uiColor(COLOR_MUTED_TEXT), false);
             }
         }
 
@@ -9625,9 +9625,9 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             return button.tooltip();
         }
         if (this.isControlHeld()) {
-            return "Back to item list";
+            return Component.translatable("title.salts_inventory_update.jei.back_to_list").getString();
         }
-        return this.isShiftHeld() ? "Forward" : "Back";
+        return this.isShiftHeld() ? Component.translatable("title.salts_inventory_update.jei.forward").getString() : Component.translatable("title.salts_inventory_update.jei.back").getString();
     }
 
     private void renderJeiRecipeStations(GuiGraphicsExtractor graphics, InventoryWindow window, RecipeBrowserAccess access, int mouseX, int mouseY) {
@@ -11412,7 +11412,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         }
 
         if (slots.isEmpty()) {
-            graphics.text(this.font, "No item slots", window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
+            graphics.text(this.font, Component.translatable("warn.salts_inventory_update.no_item_slots").getString(), window.contentX(), window.contentY(), this.uiColor(COLOR_MUTED_TEXT), false);
             return;
         }
 
@@ -15221,102 +15221,133 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
 
     private enum InstructionsPage {
         DESKTOP(
-            "Salt Desktop",
+            Component.translatable("instructions.salts_inventory_update.desktop.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Welcome",
-                    "Welcome to the new and improved inventory experience!",
-                    "If you do not want to read this now, simply close this window."
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.2").getString()
                 ),
                 InstructionsSection.text(
-                    "What Changed",
-                    "Your inventory and opened containers now appear as windows.",
-                    "You can keep multiple windows open and move items between them for easier inventory management."
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.change.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Open Again",
-                    "Use /saltsinventory help to open this window again at any time."
+                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.1").getString()
                 )
             )
         ),
         CONTROLS(
-            "Main Controls",
+           Component.translatable("instructions.salts_inventory_update.control.title").getString(),
             List.of(
                 InstructionsSection.binds(
-                    "Open Windows",
-                    InstructionsLine.bind("E", "Open/Close Inventory"),
-                    InstructionsLine.bind("C", "Open/Close Armor and Crafting"),
-                    InstructionsLine.bind("H", "Open/Close Recipe Browser Window")
+                    Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
+                    InstructionsLine.bind(
+                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
+                    ),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
+                    ),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.open.jei").getString()
+                    )
                 ),
                 InstructionsSection.binds(
-                    "Desktop Control",
-                    InstructionsLine.bind("Hold E", "Close all Salt windows"),
-                    InstructionsLine.mouseFocus("Give the mouse to camera control, or use the hotbar with no windows open"),
-                    InstructionsLine.bind("Esc", "Close the Salt desktop")
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
+                    InstructionsLine.bind(
+                        Component.literal(
+                            Component.translatable("key.salts_inventory_update.hold").getString() +
+                            " " +
+                            Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
+                        ).getString(),
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
+                    ),
+                    InstructionsLine.mouseFocus(
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
+                    ),
+                    InstructionsLine.bind(
+                        "Esc",
+                        Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
+                    )
                 )
             )
         ),
         WINDOWS(
-            "Window Controls",
+            Component.translatable("instructions.salts_inventory_update.windows.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Move And Arrange",
-                    "Unlock a window to drag it around the screen and place it wherever feels best.",
-                    "If resizing is enabled in settings, supported windows can be resized by dragging their bottom-right corner."
+                    Component.translatable("instructions.salts_inventory_update.windows.move.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.windows.move.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.windows.move.2").getString(),
+                    Component.translatable("instructions.salts_inventory_update.windows.move.3").getString()
                 ),
-                InstructionsSection.binds(
-                    "Title Buttons",
-                    InstructionsLine.control(WindowControl.FOCUS, "Focus: Shift-clicked items move directly into the focused window when possible."),
-                    InstructionsLine.control(WindowControl.PIN, "Pin: Saves this window's position for the next time it opens. Click to pin or unpin."),
-                    InstructionsLine.control(WindowControl.LOCK, "Lock: Prevents the window from being moved or resized. Click to lock or unlock."),
-                    InstructionsLine.control(WindowControl.MINIMIZE, "Minimize: Collapses the window into a title bar to keep your screen less cluttered."),
-                    InstructionsLine.control(WindowControl.CLOSE, "Close: Closes the window.")
+                InstructionsSection.binds(//this whole section disapper, why?? //need more vertical space
+                    Component.translatable("instructions.salts_inventory_update.windows.buttons.title").getString(),
+                    InstructionsLine.control(WindowControl.FOCUS, Component.translatable("instructions.salts_inventory_update.windows.buttons.focus").getString()),
+                    InstructionsLine.control(WindowControl.PIN, Component.translatable("instructions.salts_inventory_update.windows.buttons.pin").getString()),
+                    InstructionsLine.control(WindowControl.LOCK, Component.translatable("instructions.salts_inventory_update.windows.buttons.lock").getString()),
+                    InstructionsLine.control(WindowControl.LINK, Component.translatable("instructions.salts_inventory_update.windows.buttons.link").getString()),
+                    InstructionsLine.control(WindowControl.MINIMIZE, Component.translatable("instructions.salts_inventory_update.windows.buttons.minimize").getString()),
+                    InstructionsLine.control(WindowControl.CLOSE, Component.translatable("instructions.salts_inventory_update.windows.buttons.close").getString())
                 )
             )
         ),
         INVENTORY(
-            "Inventory Tools",
+            Component.translatable("instructions.salts_inventory_update.inventory.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Hotbar",
-                    "Move items in and out of your hotbar by dragging them between the hotbar and other inventory slots.",
-                    "Enable Return Hotbar to Inventory in settings to place it below Inventory and Creative and move the offhand slot into Character."
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Expandable Inventory",
-                    "If enabled in settings, you can spend XP levels to purchase extra inventory slots.",
-                    "Purchased slots stay with your player and behave like normal inventory storage."
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.2").getString()
                 )
             )
         ),
         JEI(
-            "Recipe Browser Window",
+            Component.translatable("instructions.salts_inventory_update.jei.title").getString(),
             List.of(
                 InstructionsSection.binds(
-                    "Open And Search",
-                    InstructionsLine.bind("H", "Open the recipe browser as a Salt window"),
-                    InstructionsLine.text("Search ingredients, recipes, uses, favorites, and recent items.")
+                    Component.translatable("instructions.salts_inventory_update.jei.search.title").getString(),
+                    InstructionsLine.bind(
+                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
+                        Component.translatable("instructions.salts_inventory_update.jei.search.1").getString()
+                    ),
+                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.search.2").getString())
                 ),
                 InstructionsSection.binds(
-                    "Recipe Flow",
-                    InstructionsLine.control(WindowControl.LINK, "Link: Select another highlighted window to make linked windows open and close together."),
-                    InstructionsLine.binds(List.of("R", "U"), "Hover lookups for recipes and uses"),
-                    InstructionsLine.text("Move Items works with compatible Salt crafting windows.")
+                    Component.translatable("instructions.salts_inventory_update.jei.recipe.title").getString(),
+                    InstructionsLine.binds(
+                        List.of(
+                            "U",
+                            "R"
+                        ),
+                        Component.translatable("instructions.salts_inventory_update.jei.recipe.1").getString()
+                    ),
+                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.recipe.2").getString())
                 )
             )
         ),
         TOMS_STORAGE(
-            "Tom's Simple Storage",
+            Component.translatable("instructions.salts_inventory_update.toms.title").getString(),
             List.of(
                 InstructionsSection.text(
-                    "Terminals",
-                    "Storage and crafting terminals open as Salt windows.",
-                    "Terminal search, sorting, and recipes stay inside the window."
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.terminals.2").getString()
                 ),
                 InstructionsSection.text(
-                    "Supported Screens",
-                    "Filters, inventory links, level emitters, and filing cabinets",
-                    "use Salt layouts when Tom's Simple Storage is installed."
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.title").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.1").getString(),
+                    Component.translatable("instructions.salts_inventory_update.toms.supported.2").getString()
                 )
             )
         );
@@ -15325,15 +15356,33 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         private final List<InstructionsSection> sections;
         private static final List<InstructionsSection> CONTROLS_WITHOUT_JEI_SECTIONS = List.of(
             InstructionsSection.binds(
-                "Open Windows",
-                InstructionsLine.bind("E", "Open/Close Inventory"),
-                InstructionsLine.bind("C", "Open/Close Armor and Crafting")
+                Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
+                InstructionsLine.bind(
+                    Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
+                ),
+                InstructionsLine.bind(
+                    WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
+                )
             ),
             InstructionsSection.binds(
-                "Desktop Control",
-                InstructionsLine.bind("Hold E", "Close all Salt windows"),
-                InstructionsLine.mouseFocus("Give the mouse to camera control, or use the hotbar with no windows open"),
-                InstructionsLine.bind("Esc", "Close the Salt desktop")
+                Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
+                InstructionsLine.bind(
+                    Component.literal(
+                        Component.translatable("key.salts_inventory_update.hold").getString() +
+                        " " +
+                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
+                    ).getString(),
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
+                ),
+                InstructionsLine.mouseFocus(
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
+                ),
+                InstructionsLine.bind(
+                    "Esc",
+                    Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
+                )
             )
         );
 
@@ -15452,11 +15501,11 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     }
 
     private enum JeiRecipeButton {
-        HISTORY("Back"),
-        PREVIOUS_CATEGORY("Previous category"),
-        NEXT_CATEGORY("Next category"),
-        PREVIOUS_CATEGORY_TAB_PAGE("Previous tab page"),
-        NEXT_CATEGORY_TAB_PAGE("Next tab page");
+        HISTORY(Component.translatable("title.salts_inventory_update.jei.back").getString()),
+        PREVIOUS_CATEGORY(Component.translatable("title.salts_inventory_update.jei.prev_category").getString()),
+        NEXT_CATEGORY(Component.translatable("title.salts_inventory_update.jei.next_category").getString()),
+        PREVIOUS_CATEGORY_TAB_PAGE(Component.translatable("title.salts_inventory_update.jei.prev_page").getString()),
+        NEXT_CATEGORY_TAB_PAGE(Component.translatable("title.salts_inventory_update.jei.next_page").getString());
 
         private final String tooltip;
 
@@ -15470,8 +15519,8 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
     }
 
     private enum JeiRecipeOptionButton {
-        BOOKMARKED(RecipeBrowserSortStage.BOOKMARKED, "Show bookmarked recipes first", "Stop showing bookmarked recipes first"),
-        CRAFTABLE(RecipeBrowserSortStage.CRAFTABLE, "Show craftable recipes first", "Stop showing craftable recipes first");
+        BOOKMARKED(RecipeBrowserSortStage.BOOKMARKED, Component.translatable("title.salts_inventory_update.jei.show_marked_first").getString(), Component.translatable("title.salts_inventory_update.jei.stop_show_marked_first").getString()),
+        CRAFTABLE(RecipeBrowserSortStage.CRAFTABLE, Component.translatable("title.salts_inventory_update.jei.show_craftable_first").getString(), Component.translatable("title.salts_inventory_update.jei.stop_show_craftable_first").getString());
 
         private final RecipeBrowserSortStage stage;
         private final String disabledTooltip;

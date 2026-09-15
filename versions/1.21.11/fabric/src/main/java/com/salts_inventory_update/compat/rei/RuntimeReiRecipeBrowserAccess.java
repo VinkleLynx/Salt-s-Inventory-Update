@@ -114,8 +114,8 @@ final class RuntimeReiRecipeBrowserAccess implements RecipeBrowserAccess {
     @Override
     public List<RecipeBrowserTab> tabs() {
         Map<String, RecipeBrowserTab> tabs = new LinkedHashMap<>();
-        tabs.put(FAVORITES_TAB_UID, new RecipeBrowserTab(FAVORITES_TAB_UID, Component.translatable("text.rei.favorites"), null, RecipeBrowserTabKind.FAVORITES));
-        tabs.put(RECENT_TAB_UID, new RecipeBrowserTab(RECENT_TAB_UID, Component.translatable("title.salts_inventory_update.rei.recent"), null, RecipeBrowserTabKind.RECENT));
+        tabs.put(FAVORITES_TAB_UID, new RecipeBrowserTab(FAVORITES_TAB_UID, Component.translatable("title.salts_inventory_update.jei.favorties"), null, RecipeBrowserTabKind.FAVORITES));
+        tabs.put(RECENT_TAB_UID, new RecipeBrowserTab(RECENT_TAB_UID, Component.translatable("title.salts_inventory_update.jei.recent"), null, RecipeBrowserTabKind.RECENT));
         for (EntryStack<?> stack : this.entryStacks()) {
             if (stack == null || stack.isEmpty()) {
                 continue;
@@ -896,7 +896,7 @@ final class RuntimeReiRecipeBrowserAccess implements RecipeBrowserAccess {
                 this.clampPan();
                 this.widget.render(graphics.unwrap(), this.widget.getBounds(), mouseX, mouseY, tickProgress);
             } else {
-                Component message = this.error == null ? Component.translatable("message.salts_inventory_update.rei.tagtree.loading") : this.error;
+                Component message = this.error == null ? Component.translatable("title.salts_inventory_update.rei.tagtree.loading") : this.error;
                 graphics.text(Minecraft.getInstance().font, message, x + 4, y + 4, 0xFFAAAAAA, false);
             }
         }
