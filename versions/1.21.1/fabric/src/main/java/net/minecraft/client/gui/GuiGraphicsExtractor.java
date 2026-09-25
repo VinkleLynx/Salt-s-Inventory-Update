@@ -2,7 +2,6 @@ package com.salts_inventory_update.client.gui;
 
 import java.util.List;
 import java.util.Optional;
-import java.lang.reflect.Method;
 
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
@@ -13,7 +12,9 @@ import com.mojang.math.Axis;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipComponent;
 import net.minecraft.client.gui.screens.inventory.tooltip.ClientTooltipPositioner;
+import net.minecraft.client.gui.screens.inventory.tooltip.DefaultTooltipPositioner;
 import net.minecraft.client.model.BookModel;
 import com.salts_inventory_update.client.model.object.banner.BannerFlagModel;
 import net.minecraft.client.renderer.texture.OverlayTexture;
@@ -30,9 +31,9 @@ import net.minecraft.world.item.DyeColor;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BannerPatternLayers;
 
-public final class GuiGraphicsExtractor {
-    private static final Method INNER_BLIT = findInnerBlit();
+import com.salts_inventory_update.mixin.client.GuiGraphicsAccessor;
 
+public final class GuiGraphicsExtractor {
     private final GuiGraphics graphics;
     private final PoseAdapter pose;
 
@@ -171,36 +172,18 @@ public final class GuiGraphicsExtractor {
     }
 
     public void blit(ResourceLocation texture, int x, int y, int width, int height, float u0, float u1, float v0, float v1) {
-        if (INNER_BLIT != null) {
-            try {
-                INNER_BLIT.invoke(this.graphics, texture, x, x + width, y, y + height, 0, u0, u1, v0, v1);
-                return;
-            } catch (ReflectiveOperationException | RuntimeException ignored) {
-            }
-        }
-        this.graphics.blit(texture, x, y, 0.0F, 0.0F, width, height, width, height);
-    }
-
-    private static Method findInnerBlit() {
-        try {
-            Method method = GuiGraphics.class.getDeclaredMethod(
-                "innerBlit",
-                ResourceLocation.class,
-                int.class,
-                int.class,
-                int.class,
-                int.class,
-                int.class,
-                float.class,
-                float.class,
-                float.class,
-                float.class
-            );
-            method.setAccessible(true);
-            return method;
-        } catch (ReflectiveOperationException | RuntimeException ignored) {
-            return null;
-        }
+        ((GuiGraphicsAccessor) this.graphics).salts_inventory_update$invokeInnerBlit(
+            texture,
+            x,
+            x + width,
+            y,
+            y + height,
+            0,
+            u0,
+            u1,
+            v0,
+            v1
+        );
     }
 
     public void blitSprite(Object pipeline, ResourceLocation sprite, int x, int y, int width, int height) {
@@ -320,6 +303,16 @@ public final class GuiGraphicsExtractor {
 
     public void setComponentTooltipForNextFrame(Font font, List<Component> lines, int mouseX, int mouseY, ResourceLocation texture) {
         this.graphics.renderComponentTooltip(font, lines, mouseX, mouseY);
+    }
+
+    public void setClientTooltipForNextFrame(Font font, List<ClientTooltipComponent> components, int mouseX, int mouseY) {
+        ((GuiGraphicsAccessor) this.graphics).salts_inventory_update$invokeRenderTooltipInternal(
+            font,
+            components,
+            mouseX,
+            mouseY,
+            DefaultTooltipPositioner.INSTANCE
+        );
     }
 
     public static final class PoseAdapter {

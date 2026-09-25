@@ -12,3 +12,5 @@ run/
 **/run/
 .DS_Store
 .vscode/
+/functional-tests/results/backup-*/
+/versions/*/*/logs/

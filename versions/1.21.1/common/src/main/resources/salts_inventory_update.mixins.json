@@ -8,7 +8,11 @@
     "InventoryExpansionInventoryMixin",
     "InventoryMenuMixin",
     "PlayerInventoryExpansionMixin",
+    "ServerPlaceRecipeInventoryExpansionMixin",
     "server.ChestOpenersCounterMixin",
+    "accessor.PlayerEnderChestContainerAccessor",
+    "server.ChestMenuEnderChestMixin",
+    "server.CraftingMenuMixin",
     "server.ServerPlayerInventoryExpansionMixin",
     "server.ServerPlayerMixin",
     "server.ServerGamePacketListenerImplMixin"
@@ -16,13 +20,16 @@
   "client": [
     "client.ClientPacketListenerInventoryExpansionMixin",
     "client.GameRendererMixin",
+    "client.GuiGraphicsAccessor",
     "client.GuiMixin",
     "client.KeyboardHandlerMixin",
     "client.MinecraftMixin",
     "client.MinecraftInvoker",
     "client.MenuScreensAccessor",
+    "client.MinecraftMouseHandoffMixin",
     "client.MultiPlayerGameModeMixin",
     "client.MouseHandlerAccessor",
+    "client.MouseHandlerHandoffMixin",
     "client.RecipeBookComponentAccessor"
   ],
   "server": [],

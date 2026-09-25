@@ -48,6 +48,6 @@ This keeps version API differences contained while still letting you share most 
 .\gradlew.bat :(mc_version):(mod_loader):build
 ```
 
-After a full `.\gradlew.bat build`, the final uploadable Fabric/Forge/NeoForge jars are collected in `build/upload-jars`.
+After a full `.\gradlew.bat build`, the ten verified Fabric/Forge/NeoForge jars and `SHA256SUMS.txt` are collected in `build/release/0.1.2`. The versioned directory is synchronized from scratch so stale artifacts cannot enter a release.
 
 For publishing, uncomment the `publishing` block in [build.gradle.kts](build.gradle.kts), add the CurseForge and Modrinth project IDs, then set `CURSEFORGE_TOKEN` and `MODRINTH_TOKEN` in your environment.

@@ -21,6 +21,8 @@ import net.minecraft.world.item.ItemStack;
 import com.salts_inventory_update.network.DesktopPackets;
 import com.salts_inventory_update.network.DesktopPackets.DesktopMerchantOffersPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopOpenSessionPayload;
+import com.salts_inventory_update.internal.desktop.DesktopItemSourceLocks;
+import com.salts_inventory_update.internal.desktop.DesktopMenuSlots;
 
 public final class DesktopContainerSession {
     private final int sessionId;
@@ -30,11 +32,15 @@ public final class DesktopContainerSession {
     private final int specialKind;
     private final int entityId;
     private final int columns;
+    private final boolean transferSupported;
+    private final int replacesSessionId;
     private final List<Slot> containerSlots;
     private final int minSlotX;
     private final int minSlotY;
     private final int contentWidth;
     private final int contentHeight;
+    private final DesktopItemSourceLocks.Lease sourceLock;
+    private boolean closed;
 
     private DesktopContainerSession(
         int sessionId,
@@ -44,7 +50,9 @@ public final class DesktopContainerSession {
         String sourceKey,
         int specialKind,
         int entityId,
-        int columns
+        int columns,
+        boolean transferSupported,
+        int replacesSessionId
     ) {
         this.sessionId = sessionId;
         this.menu = menu;
@@ -53,28 +61,37 @@ public final class DesktopContainerSession {
         this.specialKind = specialKind;
         this.entityId = entityId;
         this.columns = columns;
+        this.transferSupported = transferSupported;
+        this.replacesSessionId = replacesSessionId;
         this.containerSlots = findContainerSlots(menu, playerInventory);
         this.minSlotX = minSlotX(this.containerSlots);
         this.minSlotY = minSlotY(this.containerSlots);
         this.contentWidth = contentWidth(this.containerSlots, this.minSlotX);
         this.contentHeight = contentHeight(this.containerSlots, this.minSlotY);
+        this.sourceLock = DesktopItemSourceLocks.acquire(playerInventory.player, menu);
     }
 
     public static DesktopContainerSession create(Minecraft minecraft, DesktopOpenSessionPayload payload) {
+        return create(minecraft, payload, new byte[0], -1);
+    }
+
+    public static DesktopContainerSession create(Minecraft minecraft, DesktopOpenSessionPayload payload, byte[] openingData, int replacesSessionId) {
         LocalPlayer player = minecraft.player;
         if (player == null) {
             throw new IllegalStateException("Cannot create container session without a local player");
         }
 
-        AbstractContainerMenu menu = createMenu(minecraft, payload, player);
+        AbstractContainerMenu menu = createMenu(minecraft, payload, player, openingData);
         List<ItemStack> items = payload.items();
-        if (items.size() > menu.slots.size()) {
-            items = items.subList(0, menu.slots.size());
+        DesktopMenuSlots.prepareSnapshot(menu, items);
+        if (items.size() != DesktopMenuSlots.size(menu)) {
+            throw new IllegalArgumentException("Desktop session slot snapshot mismatch: expected=" + DesktopMenuSlots.size(menu) + ", actual=" + items.size());
         }
         menu.initializeContents(payload.stateId(), items, payload.carried());
-        for (int i = 0; i < payload.data().length; i++) {
+        int[] data = payload.data();
+        for (int i = 0; i < data.length; i++) {
             try {
-                menu.setData(i, payload.data()[i]);
+                menu.setData(i, data[i]);
             } catch (IndexOutOfBoundsException ignored) {
                 break;
             }
@@ -88,11 +105,13 @@ public final class DesktopContainerSession {
             payload.sourceKey(),
             payload.specialKind(),
             payload.entityId(),
-            payload.columns()
+            payload.columns(),
+            payload.transferSupported(),
+            replacesSessionId
         );
     }
 
-    private static AbstractContainerMenu createMenu(Minecraft minecraft, DesktopOpenSessionPayload payload, LocalPlayer player) {
+    private static AbstractContainerMenu createMenu(Minecraft minecraft, DesktopOpenSessionPayload payload, LocalPlayer player, byte[] openingData) {
         if (isHorseSpecialKind(payload.specialKind())) {
             Entity entity = minecraft.level == null ? null : minecraft.level.getEntity(payload.entityId());
             if (entity instanceof AbstractHorse horse) {
@@ -106,6 +125,10 @@ public final class DesktopContainerSession {
         } else {
             MenuType<?> menuType = DesktopPackets.menuTypeById(payload.menuTypeId());
             if (menuType != null) {
+                AbstractContainerMenu adapted = DesktopMenuFactories.create(menuType, minecraft, player, payload.sessionId(), openingData);
+                if (adapted != null) {
+                    return adapted;
+                }
                 return menuType.create(payload.sessionId(), player.getInventory());
             }
         }
@@ -147,6 +170,21 @@ public final class DesktopContainerSession {
         return this.columns;
     }
 
+    public boolean transferSupported() {
+        return this.transferSupported;
+    }
+
+    public int replacesSessionId() {
+        return this.replacesSessionId;
+    }
+
+    public void close() {
+        if (!this.closed) {
+            this.closed = true;
+            this.sourceLock.close();
+        }
+    }
+
     public boolean isMountSession() {
         return isHorseSpecialKind(this.specialKind);
     }
@@ -177,7 +215,7 @@ public final class DesktopContainerSession {
     }
 
     public void updateSlot(int slotIndex, int stateId, ItemStack stack) {
-        if (slotIndex >= 0 && slotIndex < this.menu.slots.size()) {
+        if (slotIndex >= 0 && slotIndex < DesktopMenuSlots.size(this.menu)) {
             this.menu.setItem(slotIndex, stateId, stack);
         }
     }
@@ -205,7 +243,7 @@ public final class DesktopContainerSession {
 
     private static List<Slot> findContainerSlots(AbstractContainerMenu menu, Inventory playerInventory) {
         List<Slot> slots = new ArrayList<>();
-        for (Slot slot : menu.slots) {
+        for (Slot slot : DesktopMenuSlots.all(menu)) {
             if (slot.container != playerInventory) {
                 slots.add(slot);
             }

@@ -24,9 +24,13 @@ import com.salts_inventory_update.api.desktop.SaltsInventoryDesktopApi;
 import com.salts_inventory_update.client.SaltsInventoryConfig;
 import com.salts_inventory_update.client.WindowOpeningStyle;
 import com.salts_inventory_update.client.WindowedInventoryClient;
+import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserAccess;
+import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserBridge;
+import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserSource;
 import com.salts_inventory_update.inventory.InventoryExpansion;
 import com.salts_inventory_update.network.DesktopPackets;
 import com.salts_inventory_update.platform.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import com.salts_inventory_update.platform.loader.api.FabricLoader;
 
 public final class FunctionalTestHarness {
     private static final int START_DELAY_TICKS = 5;
@@ -66,6 +70,7 @@ public final class FunctionalTestHarness {
             SaltsInventoryRuntime.setServerDesktopAvailable(true);
 
             runTest("runtime-and-keybinds", recorder, FunctionalTestHarness::testRuntimeAndKeybinds);
+            runTest("recipe-browser-integration", recorder, FunctionalTestHarness::testRecipeBrowserIntegration);
             runTest("config-normalization", recorder, FunctionalTestHarness::testConfigNormalization);
             runTest("desktop-menu-screens", recorder, FunctionalTestHarness::testDesktopMenuScreens);
             runTest("desktop-api-definitions", recorder, FunctionalTestHarness::testDesktopApiDefinitions);
@@ -106,6 +111,15 @@ public final class FunctionalTestHarness {
         );
     }
 
+    private static void testRecipeBrowserIntegration(ResultRecorder recorder) {
+        if (!FabricLoader.getInstance().isModLoaded("emi")) {
+            return;
+        }
+        RecipeBrowserAccess access = RecipeBrowserBridge.access();
+        recorder.check("recipe_browser.emi_selected", access.source() == RecipeBrowserSource.EMI);
+        recorder.check("recipe_browser.emi_available", access.isAvailable());
+    }
+
     private static void testConfigNormalization(ResultRecorder recorder) {
         ConfigSnapshot original = ConfigSnapshot.capture(SaltsInventoryConfig.get());
         try {
@@ -118,6 +132,7 @@ public final class FunctionalTestHarness {
                 config.enableWindowSnapping = false;
                 config.resetLockedWindows = false;
                 config.enableGhostPins = true;
+                config.globalPins = true;
                 config.ghostWindowOpacity = 42.0D;
                 config.eHoldCloseAllSeconds = 0.10D;
             });
@@ -130,6 +145,7 @@ public final class FunctionalTestHarness {
             );
             recorder.check("config.ghost_opacity_clamps_high", normalized.ghostWindowOpacity == 0.90D);
             recorder.check("config.e_hold_seconds_clamps_low", normalized.eHoldCloseAllSeconds == 0.50D);
+            recorder.check("config.global_pins_round_trips", normalized.globalPins);
         } finally {
             SaltsInventoryConfig.update(original::applyTo);
             SaltsInventoryConfig.reload();
@@ -398,6 +414,7 @@ public final class FunctionalTestHarness {
         boolean enableWindowSnapping,
         boolean resetLockedWindows,
         boolean enableGhostPins,
+        boolean globalPins,
         double ghostWindowOpacity,
         double eHoldCloseAllSeconds
     ) {
@@ -411,6 +428,7 @@ public final class FunctionalTestHarness {
                 config.enableWindowSnapping,
                 config.resetLockedWindows,
                 config.enableGhostPins,
+                config.globalPins,
                 config.ghostWindowOpacity,
                 config.eHoldCloseAllSeconds
             );
@@ -425,6 +443,7 @@ public final class FunctionalTestHarness {
             config.enableWindowSnapping = this.enableWindowSnapping;
             config.resetLockedWindows = this.resetLockedWindows;
             config.enableGhostPins = this.enableGhostPins;
+            config.globalPins = this.globalPins;
             config.ghostWindowOpacity = this.ghostWindowOpacity;
             config.eHoldCloseAllSeconds = this.eHoldCloseAllSeconds;
         }

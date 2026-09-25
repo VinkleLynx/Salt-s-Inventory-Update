@@ -8,7 +8,11 @@ import org.gradle.api.tasks.bundling.Jar
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.testing.Test
+import org.gradle.language.jvm.tasks.ProcessResources
+import java.security.MessageDigest
 import java.util.zip.ZipFile
 
 plugins {
@@ -16,7 +20,7 @@ plugins {
 }
 
 group = "com.salts_inventory_update"
-version = "0.1.1"
+version = "0.1.2"
 
 val modMenuVersions = mapOf(
     "1.20.1" to "7.2.2",
@@ -41,11 +45,18 @@ val includeJeiRuntime = providers.gradleProperty("includeJeiRuntime")
 val includeReiRuntime = providers.gradleProperty("includeReiRuntime")
     .map { it.equals("true", ignoreCase = true) }
     .orElse(false)
+val includeEmiRuntime = providers.gradleProperty("includeEmiRuntime")
+    .map { it.equals("true", ignoreCase = true) }
+    .orElse(false)
+val includeSophisticatedRuntime = providers.gradleProperty("includeSophisticatedRuntime")
+    .map { it.equals("true", ignoreCase = true) }
+    .orElse(false)
 
 val nonFabricSharedSourceExcludes = listOf(
     "**/SaltsInventoryUpdateFabric.java",
     "**/SaltsInventoryUpdateFabricClient.java",
-    "**/compat/rei/SaltsReiClientPlugin.java"
+    "**/compat/rei/SaltsReiClientPlugin.java",
+    "**/compat/emi/SaltsEmiClientPlugin.java"
 )
 
 fun fabricPlatformSourceDir(minecraftVersion: String) =
@@ -147,7 +158,7 @@ prism {
             fabricApi("0.153.0+26.2")
         }
         neoforge {
-            loaderVersion = "26.2.0.7-beta"
+            loaderVersion = "26.2.0.53-beta"
         }
     }
 
@@ -167,7 +178,7 @@ prism {
             fabricApi("0.116.1+1.21.1")
         }
         neoforge {
-            loaderVersion = "21.1.95"
+            loaderVersion = "21.1.229"
         }
     }
 
@@ -184,6 +195,29 @@ prism {
 
 subprojects {
     val minecraftVersion = parent?.name
+
+    plugins.withId("java") {
+        if (name in setOf("fabric", "forge", "neoforge")) {
+            tasks.withType<ProcessResources>().configureEach {
+                from(rootProject.file("artwork/shared-resources"))
+            }
+        }
+        dependencies.add("compileOnly", "org.jspecify:jspecify:1.0.0")
+        if (path == ":common") {
+            dependencies.add("testImplementation", "org.junit.jupiter:junit-jupiter:5.11.4")
+            dependencies.add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:1.11.4")
+            tasks.withType<Test>().configureEach {
+                useJUnitPlatform()
+            }
+        }
+        tasks.withType<Jar>().configureEach {
+            exclude("**/*.pdn")
+            from(rootProject.file("LICENSE")) {
+                rename { "LICENSE_salts_inventory_update" }
+            }
+        }
+    }
+
     repositories {
         maven {
             name = "Terraformers"
@@ -201,6 +235,81 @@ subprojects {
             name = "Shedaniel"
             url = uri("https://maven.shedaniel.me/")
         }
+        maven {
+            name = "Sleeping Town"
+            url = uri("https://repo.sleeping.town/")
+        }
+        maven {
+            name = "Modrinth"
+            url = uri("https://api.modrinth.com/maven")
+            content {
+                includeGroup("maven.modrinth")
+            }
+        }
+    }
+
+    val sophisticatedVersions = mapOf(
+        "1.20.1" to listOf(
+            "maven.modrinth:nmoqTijg:JGT2DD0v", // Sophisticated Core 1.20.1-1.3.84.2308
+            "maven.modrinth:TyCTlI4b:as0tf712", // Sophisticated Backpacks 1.20.1-3.24.67.2109
+            "maven.modrinth:hMlaZH8f:JCxeJIsN"  // Sophisticated Storage 1.20.1-1.4.86.2131
+        ),
+        "1.21.1" to listOf(
+            "maven.modrinth:nmoqTijg:zvRSOlro", // Sophisticated Core 1.21.1-1.4.90.2299
+            "maven.modrinth:TyCTlI4b:6apvKKGZ", // Sophisticated Backpacks 1.21.1-3.25.78.2107
+            "maven.modrinth:hMlaZH8f:H7wGZ8Sl"  // Sophisticated Storage 1.21.1-1.5.91.2127
+        ),
+        "1.21.11" to listOf(
+            "maven.modrinth:nmoqTijg:pmCuOREP", // Sophisticated Core 1.21.11-1.4.97.2313
+            "maven.modrinth:TyCTlI4b:NzDlKHxL", // Sophisticated Backpacks 1.21.11-3.25.84.2111
+            "maven.modrinth:hMlaZH8f:PJ4lJy4t"  // Sophisticated Storage 1.21.11-1.5.102.2130
+        ),
+        "26.1.2" to listOf(
+            "maven.modrinth:nmoqTijg:tU9HuNqP", // Sophisticated Core 26.1.2-1.4.104.2314
+            "maven.modrinth:TyCTlI4b:M5qQesFi", // Sophisticated Backpacks 26.1.2-3.25.90.2106
+            "maven.modrinth:hMlaZH8f:KmorqxvZ"  // Sophisticated Storage 26.1.2-1.5.112.2123
+        ),
+        "26.2" to listOf(
+            "maven.modrinth:nmoqTijg:MNbKeSux", // Sophisticated Core 26.2-1.4.101.2276
+            "maven.modrinth:TyCTlI4b:O6LyTNAu", // Sophisticated Backpacks 26.2-3.25.90.2091
+            "maven.modrinth:hMlaZH8f:F4SdMde3"  // Sophisticated Storage 26.2-1.5.108.2088
+        )
+    )
+    if (minecraftVersion != null && name in setOf("forge", "neoforge")) {
+        afterEvaluate {
+            val dependenciesForVersion = sophisticatedVersions[minecraftVersion].orEmpty()
+            dependenciesForVersion.forEach { dependency ->
+                dependencies.add("compileOnly", dependency)
+            }
+            if (!includeSophisticatedRuntime.get()) {
+                return@afterEvaluate
+            }
+            if (name == "forge" && minecraftVersion == "1.20.1") {
+                @Suppress("UNCHECKED_CAST")
+                val mappingsType = Class.forName("net.neoforged.moddevgradle.legacyforge.internal.MinecraftMappings") as Class<Named>
+                val mappingsAttribute = Attribute.of("net.neoforged.moddevgradle.legacy.minecraft_mappings.v2", mappingsType)
+                val namedMappings = objects.named(mappingsType, "named")
+                val sophisticatedForgeRuntimeNamed = configurations.maybeCreate("sophisticatedForgeRuntimeNamed").apply {
+                    isCanBeConsumed = false
+                    isCanBeResolved = true
+                    attributes {
+                        attribute(mappingsAttribute, namedMappings)
+                        attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                        attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+                    }
+                }
+                dependenciesForVersion.forEach { dependency ->
+                    dependencies.add(sophisticatedForgeRuntimeNamed.name, dependency)
+                }
+                tasks.named<JavaExec>("runClient") {
+                    classpath += files(sophisticatedForgeRuntimeNamed)
+                }
+            } else {
+                dependenciesForVersion.forEach { dependency ->
+                    dependencies.add("runtimeOnly", dependency)
+                }
+            }
+        }
     }
 
     tasks.withType<JavaCompile>().configureEach {
@@ -211,11 +320,16 @@ subprojects {
         if (name == "runClient") {
             val runTask = this
             runTask.doFirst {
-                if (minecraftVersion == "1.20.1" && project.name == "forge") {
-                    if (!runTask.args.contains("--mixin.config")) {
-                        runTask.args("--mixin.config", "salts_inventory_update.mixins.json")
-                    }
-                    logger.lifecycle("Salt's Inventory Update Forge 1.20.1 mixin config launch arg enabled")
+                val staleJeiJars = runTask.workingDir
+                    .resolve("mods")
+                    .listFiles { file -> file.isFile && file.name.startsWith("jei-") && file.name.endsWith(".jar") }
+                    .orEmpty()
+                if (staleJeiJars.isNotEmpty()) {
+                    project.delete(staleJeiJars)
+                    logger.lifecycle(
+                        "Removed ${staleJeiJars.size} stale JEI jar(s) from ${runTask.workingDir.resolve("mods")}; " +
+                            "the optional development JEI runtime is managed by -PincludeJeiRuntime"
+                    )
                 }
                 if (enableDesktopRunDiagnostics.get()) {
                     runTask.systemProperty("salts_inventory_update.desktopDebug", "true")
@@ -272,18 +386,6 @@ subprojects {
                 }
             }
         }
-        plugins.withId("java") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFabricModMenuSourceDir()
-                addFabricPlatformSourceDir(minecraftVersion)
-            }
-        }
-        plugins.withId("java-library") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFabricModMenuSourceDir()
-                addFabricPlatformSourceDir(minecraftVersion)
-            }
-        }
     }
 
     val jeiVersions = mapOf(
@@ -293,9 +395,19 @@ subprojects {
         "1.21.1" to "19.25.1.332",
         "1.20.1" to "15.20.0.127"
     )
+    val neoForgeJeiVersions = mapOf(
+        "26.2" to "30.7.0.39",
+        "1.21.11" to "27.13.0.43",
+        "1.21.1" to "19.32.0.359"
+    )
     if (minecraftVersion != null && (name == "fabric" || name == "neoforge" || name == "forge")) {
         afterEvaluate {
-            jeiVersions[minecraftVersion]?.let { jeiVersion ->
+            val jeiVersion = if (name == "neoforge") {
+                neoForgeJeiVersions[minecraftVersion] ?: jeiVersions[minecraftVersion]
+            } else {
+                jeiVersions[minecraftVersion]
+            }
+            jeiVersion?.let { resolvedJeiVersion ->
                 val jeiLoader = when (name) {
                     "forge" -> "forge"
                     "neoforge" -> "neoforge"
@@ -306,7 +418,7 @@ subprojects {
                 } else {
                     "compileOnly"
                 }
-                dependencies.add(apiConfiguration, "mezz.jei:jei-$minecraftVersion-$jeiLoader-api:$jeiVersion")
+                dependencies.add(apiConfiguration, "mezz.jei:jei-$minecraftVersion-$jeiLoader-api:$resolvedJeiVersion")
                 if (!includeJeiRuntime.get()) {
                     return@let
                 }
@@ -324,7 +436,7 @@ subprojects {
                             attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
                         }
                     }
-                    dependencies.add(jeiForgeRuntimeNamed.name, "mezz.jei:jei-$minecraftVersion-$jeiLoader:$jeiVersion")
+                    dependencies.add(jeiForgeRuntimeNamed.name, "mezz.jei:jei-$minecraftVersion-$jeiLoader:$resolvedJeiVersion")
                     tasks.named<JavaExec>("runClient") {
                         classpath += files(jeiForgeRuntimeNamed)
                     }
@@ -334,7 +446,7 @@ subprojects {
                     } else {
                         "runtimeOnly"
                     }
-                    dependencies.add(runtimeConfiguration, "mezz.jei:jei-$minecraftVersion-$jeiLoader:$jeiVersion")
+                    dependencies.add(runtimeConfiguration, "mezz.jei:jei-$minecraftVersion-$jeiLoader:$resolvedJeiVersion")
                 }
             }
         }
@@ -400,19 +512,33 @@ subprojects {
         }
     }
 
+    val emiVersions = mapOf(
+        "1.21.1" to "1.1.24+1.21.1"
+    )
+    if (minecraftVersion != null && (name == "fabric" || name == "neoforge")) {
+        afterEvaluate {
+            emiVersions[minecraftVersion]?.let { emiVersion ->
+                val apiConfiguration = if (name == "fabric" && configurations.findByName("modCompileOnly") != null) {
+                    "modCompileOnly"
+                } else {
+                    "compileOnly"
+                }
+                dependencies.add(apiConfiguration, "dev.emi:emi-$name:$emiVersion:api")
+                if (includeEmiRuntime.get()) {
+                    val runtimeConfiguration = if (name == "fabric" && configurations.findByName("modRuntimeOnly") != null) {
+                        "modRuntimeOnly"
+                    } else {
+                        "runtimeOnly"
+                    }
+                    dependencies.add(runtimeConfiguration, "dev.emi:emi-$name:$emiVersion")
+                }
+            }
+        }
+    }
+
     if (minecraftVersion != null && (name == "forge" || name == "neoforge")) {
         val loaderName = name
         afterEvaluate {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addLoaderSourceDirs(minecraftVersion, loaderName)
-            }
-        }
-        plugins.withId("java") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addLoaderSourceDirs(minecraftVersion, loaderName)
-            }
-        }
-        plugins.withId("java-library") {
             extensions.findByType(SourceSetContainer::class.java)?.named("main") {
                 addLoaderSourceDirs(minecraftVersion, loaderName)
             }
@@ -425,63 +551,10 @@ subprojects {
                 addFunctionalTestSourceDir()
             }
         }
-        plugins.withId("java") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFunctionalTestSourceDir()
-            }
-        }
-        plugins.withId("java-library") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFunctionalTestSourceDir()
-            }
-        }
     }
 }
 
 gradle.projectsEvaluated {
-    subprojects {
-        val minecraftVersion = parent?.name
-        if (minecraftVersion != null && name == "fabric") {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFabricModMenuSourceDir()
-                addFabricPlatformSourceDir(minecraftVersion)
-            }
-            tasks.named<JavaCompile>("compileJava") {
-                source(rootProject.file("versions/fabric-modmenu/src/main/java"))
-                source(fabricPlatformSourceDir(minecraftVersion))
-            }
-        }
-
-        if (minecraftVersion != null && (name == "forge" || name == "neoforge")) {
-            val loaderName = name
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addLoaderSourceDirs(minecraftVersion, loaderName)
-            }
-            tasks.named<JavaCompile>("compileJava") {
-                val sourceDirs = listOf(
-                    rootProject.file("versions/$minecraftVersion/fabric/src/main/java"),
-                    rootProject.file("versions/$loaderName-shim/src/main/java")
-                )
-                exclude(nonFabricSharedSourceExcludes)
-                val currentSourceFiles = source.files.map { it.canonicalFile }.toMutableSet()
-                sourceDirs.forEach { sourceDir ->
-                    if (currentSourceFiles.add(sourceDir.canonicalFile)) {
-                        source(sourceDir)
-                    }
-                }
-            }
-        }
-
-        if (minecraftVersion != null && (name == "fabric" || name == "forge" || name == "neoforge") && includeFunctionalTests.get()) {
-            extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFunctionalTestSourceDir()
-            }
-            tasks.named<JavaCompile>("compileJava") {
-                source(rootProject.file("functional-tests/src/main/java"))
-            }
-        }
-    }
-
     tasks.register("functionalTestCompile") {
         group = "verification"
         description = "Compiles every loader/version with the shared functional test harness. Use -PincludeFunctionalTests=true."
@@ -505,11 +578,11 @@ gradle.projectsEvaluated {
 
     val collectModJars = tasks.register<Sync>("collectModJars") {
         group = "build"
-        description = "Collects final uploadable mod jars into build/upload-jars."
+        description = "Collects the ten uploadable mod jars into a clean versioned release directory."
         dependsOn(loaderAssembleTasks)
         mustRunAfter(allProjectBuildTasks)
 
-        into(layout.buildDirectory.dir("upload-jars"))
+        into(layout.buildDirectory.dir("release/$modVersion"))
         duplicatesStrategy = DuplicatesStrategy.FAIL
 
         uploadableLoaderProjects.forEach { loaderProject ->
@@ -521,6 +594,22 @@ gradle.projectsEvaluated {
         doLast {
             logger.lifecycle("Collected uploadable mod jars in ${destinationDir}")
         }
+    }
+
+    val sourceFeatureParity = tasks.register<Exec>("sourceFeatureParity") {
+        group = "verification"
+        description = "Runs the cross-version and cross-loader source parity contract."
+        val shell = if (System.getProperty("os.name").startsWith("Windows", ignoreCase = true)) "powershell" else "pwsh"
+        commandLine(
+            shell,
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            rootProject.file("functional-tests/scripts/Test-SourceFeatureParity.ps1").absolutePath,
+            "-RepoRoot",
+            rootProject.projectDir.absolutePath
+        )
     }
 
     val verifyNonFabricModJars = tasks.register("verifyNonFabricModJars") {
@@ -564,13 +653,271 @@ gradle.projectsEvaluated {
         }
     }
 
+    val verifyReleaseBundle = tasks.register("verifyReleaseBundle") {
+        group = "verification"
+        description = "Verifies release count, metadata, resources, loader isolation, and package hygiene."
+        dependsOn(collectModJars)
+        dependsOn(verifyNonFabricModJars)
+
+        doLast {
+            val releaseDirectory = collectModJars.get().destinationDir
+            val jars = releaseDirectory.listFiles { file ->
+                file.isFile && file.extension.equals("jar", ignoreCase = true)
+            }?.sortedBy { it.name } ?: emptyList()
+            if (jars.size != 10) {
+                throw GradleException("Expected exactly 10 release jars in $releaseDirectory, found ${jars.size}")
+            }
+
+            val expectedLoaders = mapOf(
+                "1.20.1" to mapOf("fabric" to null, "forge" to "[47.4.0,48)"),
+                "1.21.1" to mapOf("fabric" to null, "neoforge" to "[21.1.229,21.2)"),
+                "1.21.11" to mapOf("fabric" to null, "neoforge" to "[21.11.42,21.12)"),
+                "26.1.2" to mapOf("fabric" to null, "neoforge" to "[26.1.2.59-beta,26.1.3)"),
+                "26.2" to mapOf("fabric" to null, "neoforge" to "[26.2.0.53-beta,26.3)")
+            )
+            val languageLoaderRanges = mapOf(
+                "1.20.1" to "[47,48)",
+                "1.21.1" to "[4.0.34,5)",
+                "1.21.11" to "[10,11)",
+                "26.1.2" to "[11,12)",
+                "26.2" to "[11,12)"
+            )
+            val packFormats = mapOf(
+                "1.20.1" to 15,
+                "1.21.1" to 34,
+                "1.21.11" to 75,
+                "26.1.2" to 84,
+                "26.2" to 88
+            )
+            val boundedPackFormatVersions = setOf("1.21.11", "26.1.2", "26.2")
+            val fabricLoaderMinimums = mapOf(
+                "1.20.1" to "0.16.10",
+                "1.21.1" to "0.16.10",
+                "1.21.11" to "0.19.2",
+                "26.1.2" to "0.19.2",
+                "26.2" to "0.19.3"
+            )
+            val javaRequirements = mapOf(
+                "1.20.1" to 17,
+                "1.21.1" to 21,
+                "1.21.11" to 21,
+                "26.1.2" to 25,
+                "26.2" to 25
+            )
+            val javaMajors = mapOf(
+                "1.20.1" to 61,
+                "1.21.1" to 65,
+                "1.21.11" to 65,
+                "26.1.2" to 69,
+                "26.2" to 69
+            )
+            val mixinCompatibility = mapOf(
+                "1.20.1" to "JAVA_17",
+                "1.21.1" to "JAVA_21",
+                "1.21.11" to "JAVA_21",
+                "26.1.2" to "JAVA_25",
+                "26.2" to "JAVA_25"
+            )
+
+            expectedLoaders.forEach { (minecraftVersion, loaders) ->
+                loaders.forEach { (loader, loaderRange) ->
+                    val matches = jars.filter { jar ->
+                        val name = jar.name.lowercase()
+                        name.contains("-$minecraftVersion-") &&
+                            name.contains("-${loader.lowercase()}-") &&
+                            name.endsWith("-$modVersion.jar")
+                    }
+                    if (matches.size != 1) {
+                        throw GradleException(
+                            "Expected one $minecraftVersion $loader $modVersion jar, found ${matches.map { it.name }}"
+                        )
+                    }
+
+                    val jarFile = matches.single()
+                    ZipFile(jarFile).use { zip ->
+                        val entries = zip.entries().asSequence().map { it.name }.toSet()
+                        val forbidden = entries.filter { entry ->
+                            entry.endsWith(".pdn", ignoreCase = true) ||
+                                entry.startsWith("org/jspecify/") ||
+                                entry.contains("/functionaltest/") ||
+                                entry.contains("FunctionalTestHarness")
+                        }
+                        if (forbidden.isNotEmpty()) {
+                            throw GradleException("${jarFile.name} contains forbidden release entries: ${forbidden.take(20)}")
+                        }
+
+                        val required = setOf(
+                            "assets/salts_inventory_update/textures/gui/creative_buttons.png",
+                            "LICENSE-creative-buttons-fabric",
+                            "assets/salts_inventory_update/icon.png",
+                            "LICENSE_salts_inventory_update",
+                            "pack.mcmeta",
+                            "salts_inventory_update.mixins.json"
+                        )
+                        val missing = required - entries
+                        if (missing.isNotEmpty()) {
+                            throw GradleException("${jarFile.name} is missing required entries: $missing")
+                        }
+                        val sophisticatedMixin = "salts_inventory_update.sophisticated.mixins.json"
+                        if (minecraftVersion in setOf("1.20.1", "1.21.1", "1.21.11", "26.1.2", "26.2")
+                            && loader in setOf("forge", "neoforge")) {
+                            if (sophisticatedMixin !in entries) {
+                                throw GradleException("${jarFile.name} is missing its Forge/NeoForge Sophisticated mixin configuration")
+                            }
+                        } else if (sophisticatedMixin in entries) {
+                            throw GradleException("${jarFile.name} contains the Forge/NeoForge-only Sophisticated mixin configuration")
+                        }
+
+                        fun textEntry(name: String): String {
+                            val entry = zip.getEntry(name)
+                                ?: throw GradleException("${jarFile.name} is missing $name")
+                            return zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        }
+
+                        val pack = textEntry("pack.mcmeta")
+                        if (!pack.contains("\"pack_format\": ${packFormats.getValue(minecraftVersion)}")) {
+                            throw GradleException("${jarFile.name} has the wrong pack format for $minecraftVersion")
+                        }
+                        if (minecraftVersion in boundedPackFormatVersions) {
+                            val expectedPackFormat = packFormats.getValue(minecraftVersion)
+                            if (!pack.contains("\"min_format\": $expectedPackFormat") ||
+                                !pack.contains("\"max_format\": $expectedPackFormat")) {
+                                throw GradleException("${jarFile.name} has incorrect pack format bounds for $minecraftVersion")
+                            }
+                        }
+
+                        val mixin = textEntry("salts_inventory_update.mixins.json")
+                        if (!mixin.contains("\"compatibilityLevel\": \"${mixinCompatibility.getValue(minecraftVersion)}\"")) {
+                            throw GradleException("${jarFile.name} has a Mixin compatibility level inconsistent with its Java target")
+                        }
+                        val classEntry = zip.getEntry("com/salts_inventory_update/SaltsInventoryUpdate.class")
+                            ?: throw GradleException("${jarFile.name} is missing its main mod class")
+                        val classHeader = zip.getInputStream(classEntry).use { it.readNBytes(8) }
+                        if (classHeader.size != 8) {
+                            throw GradleException("${jarFile.name} has a truncated main mod class")
+                        }
+                        val classMajor = ((classHeader[6].toInt() and 0xFF) * 256) +
+                            (classHeader[7].toInt() and 0xFF)
+                        if (classMajor != javaMajors.getValue(minecraftVersion)) {
+                            throw GradleException(
+                                "${jarFile.name} class major $classMajor does not match Minecraft $minecraftVersion"
+                            )
+                        }
+
+                        val metadataName = when (loader) {
+                            "fabric" -> "fabric.mod.json"
+                            "forge" -> "META-INF/mods.toml"
+                            else -> "META-INF/neoforge.mods.toml"
+                        }
+                        val metadata = textEntry(metadataName)
+                        val expandedFiles = listOf(metadataName to metadata, "pack.mcmeta" to pack)
+                        expandedFiles.forEach { (name, contents) ->
+                            if (contents.contains("${'$'}{")) {
+                                throw GradleException("${jarFile.name} contains an unexpanded placeholder in $name")
+                            }
+                        }
+                        if (loader == "fabric") {
+                            if (!metadata.contains("\"id\": \"salts_inventory_update\"") ||
+                                !metadata.contains("\"version\": \"$modVersion\"") ||
+                                !metadata.contains("\"license\": \"MIT\"")) {
+                                throw GradleException("${jarFile.name} has incorrect Fabric identity, version, or license metadata")
+                            }
+                            if (!metadata.contains("\"minecraft\": \"$minecraftVersion\"")) {
+                                throw GradleException("${jarFile.name} does not target exactly Minecraft $minecraftVersion")
+                            }
+                            val fabricLoaderMinimum = fabricLoaderMinimums.getValue(minecraftVersion)
+                            if (!metadata.contains("\"fabricloader\": \">=$fabricLoaderMinimum\"")) {
+                                throw GradleException("${jarFile.name} has the wrong Fabric Loader requirement")
+                            }
+                            val javaRequirement = javaRequirements.getValue(minecraftVersion)
+                            if (!metadata.contains("\"java\": \">=$javaRequirement\"")) {
+                                throw GradleException("${jarFile.name} has the wrong Java runtime requirement")
+                            }
+                            if ("META-INF/mods.toml" in entries || "META-INF/neoforge.mods.toml" in entries) {
+                                throw GradleException("${jarFile.name} contains non-Fabric loader metadata")
+                            }
+                            if (!metadata.contains("SaltsInventoryUpdateFabric") ||
+                                !metadata.contains("SaltsInventoryUpdateFabricClient")) {
+                                throw GradleException("${jarFile.name} is missing Fabric entrypoints")
+                            }
+                        } else {
+                            if ("fabric.mod.json" in entries) {
+                                throw GradleException("${jarFile.name} contains Fabric metadata")
+                            }
+                            if (!metadata.contains("modId = \"salts_inventory_update\"") ||
+                                !metadata.contains("version = \"$modVersion\"") ||
+                                !metadata.contains("license = \"MIT\"")) {
+                                throw GradleException("${jarFile.name} has incorrect $loader identity, version, or license metadata")
+                            }
+                            fun dependencyBlock(dependencyModId: String): String? {
+                                val blocks = Regex(
+                                    """(?ms)^\[\[dependencies\.salts_inventory_update]]\s*\R.*?(?=^\[\[|\z)"""
+                                ).findAll(metadata).map { it.value }
+                                val modIdLine = "modId = \"$dependencyModId\""
+                                return blocks.singleOrNull { block ->
+                                    block.lineSequence().any { line -> line.trim() == modIdLine }
+                                }
+                            }
+
+                            val minecraftDependency = dependencyBlock("minecraft")
+                                ?: throw GradleException("${jarFile.name} is missing its structured Minecraft dependency")
+                            if (!minecraftDependency.contains("versionRange = \"[$minecraftVersion]\"")) {
+                                throw GradleException("${jarFile.name} does not use an exact Minecraft dependency range")
+                            }
+                            val languageLoaderRange = languageLoaderRanges.getValue(minecraftVersion)
+                            if (!metadata.contains("loaderVersion = \"$languageLoaderRange\"")) {
+                                throw GradleException("${jarFile.name} has the wrong javafml language-loader range")
+                            }
+                            if (loaderRange != null) {
+                                val loaderDependency = dependencyBlock(loader)
+                                    ?: throw GradleException("${jarFile.name} is missing its structured $loader dependency")
+                                if (!loaderDependency.contains("versionRange = \"$loaderRange\"")) {
+                                    throw GradleException("${jarFile.name} has the wrong $loader dependency range")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    val writeReleaseChecksums = tasks.register("writeReleaseChecksums") {
+        group = "build"
+        description = "Writes SHA-256 checksums for the verified release jars."
+        dependsOn(verifyReleaseBundle)
+
+        doLast {
+            val releaseDirectory = collectModJars.get().destinationDir
+            val digest = MessageDigest.getInstance("SHA-256")
+            val lines = releaseDirectory.listFiles { file -> file.extension.equals("jar", ignoreCase = true) }
+                ?.sortedBy { it.name }
+                ?.map { jar ->
+                    digest.reset()
+                    val hash = digest.digest(jar.readBytes()).joinToString("") { byte -> "%02x".format(byte) }
+                    "$hash  ${jar.name}"
+                }
+                ?: emptyList()
+            releaseDirectory.resolve("SHA256SUMS.txt").writeText(lines.joinToString(System.lineSeparator(), postfix = System.lineSeparator()))
+        }
+    }
+
+    val rootCheck = tasks.findByName("check")?.let { tasks.named("check") } ?: tasks.register("check") {
+        group = "verification"
+        description = "Runs root source-parity and release verification checks."
+    }
+    rootCheck.configure {
+        dependsOn(sourceFeatureParity)
+        dependsOn(verifyReleaseBundle)
+    }
+
     val rootBuild = tasks.findByName("build")?.let { tasks.named("build") } ?: tasks.register("build") {
         group = "build"
         description = "Assembles and tests every project, then collects uploadable mod jars."
     }
     rootBuild.configure {
         dependsOn(allProjectBuildTasks)
-        dependsOn(collectModJars)
-        dependsOn(verifyNonFabricModJars)
+        dependsOn(sourceFeatureParity)
+        dependsOn(writeReleaseChecksums)
     }
 }
