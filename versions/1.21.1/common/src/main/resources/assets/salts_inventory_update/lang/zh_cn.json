@@ -33,6 +33,8 @@
   "config.salts_inventory_update.reset_locked_windows.description": "窗口再次锁定时，将其恢复为默认位置和尺寸，并保留其固定模式。",
   "config.salts_inventory_update.enable_ghost_pins": "启用幽灵固定",
   "config.salts_inventory_update.enable_ghost_pins.description": "允许固定按钮循环切换至幽灵固定模式。\n禁用后，固定按钮将跳过幽灵固定，且已有的幽灵固定窗口会表现得如同普通固定窗口。",
+  "config.salts_inventory_update.global_pins": "全局固定",
+  "config.salts_inventory_update.global_pins.description": "在所有世界和服务器之间共享玩家窗口及其他非方块窗口的固定布局。附着于方块（如箱子）上的窗口则仍按世界和方块分别保存。",
   "config.salts_inventory_update.persistent_windows": "持久化窗口",
   "config.salts_inventory_update.persistent_windows.description": "当按住 E 键或按下 Esc 键时，将窗口从屏幕上清除而非关闭，并在下次打开 Salt 窗口时将其恢复。",
   "config.salts_inventory_update.minimizable_windows": "可最小化窗口",
