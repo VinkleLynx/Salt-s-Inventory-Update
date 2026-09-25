@@ -45,6 +45,7 @@ This keeps version API differences contained while still letting you share most 
 .\gradlew.bat projects
 .\gradlew.bat tasks
 .\gradlew.bat build
+.\gradlew.bat :(mc_version):(mod_loader):build
 ```
 
 After a full `.\gradlew.bat build`, the final uploadable Fabric/Forge/NeoForge jars are collected in `build/upload-jars`.
