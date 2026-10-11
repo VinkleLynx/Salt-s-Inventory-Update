@@ -149,13 +149,13 @@ final class RuntimeEmiRecipeBrowserAccess implements RecipeBrowserAccess {
         Map<String, List<RecipeBrowserEntry>> entriesByType = new LinkedHashMap<>();
         tabs.put(FAVORITES_TAB_UID, new RecipeBrowserTab(
             FAVORITES_TAB_UID,
-            Component.literal("Favorites"),
+            Component.translatable("title.salts_inventory_update.jei.favorties"),
             null,
             RecipeBrowserTabKind.FAVORITES
         ));
         tabs.put(RECENT_TAB_UID, new RecipeBrowserTab(
             RECENT_TAB_UID,
-            Component.literal("Recent"),
+            Component.translatable("title.salts_inventory_update.jei.recent"),
             null,
             RecipeBrowserTabKind.RECENT
         ));

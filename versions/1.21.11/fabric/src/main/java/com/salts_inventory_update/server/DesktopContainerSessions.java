@@ -836,7 +836,7 @@ public final class DesktopContainerSessions {
             sessions.negotiated = false;
             sessions.links.clear();
             PROTOCOL_REJECTED.add(player);
-            player.connection.disconnect(Component.literal("Salt's Inventory Update received a repeated desktop handshake."));
+            player.connection.disconnect(Component.translatable("warn.salts_inventory_update.protocol.repeat"));
             return;
         }
         PENDING_USE_TARGETS.remove(player);
@@ -844,7 +844,7 @@ public final class DesktopContainerSessions {
             || payload.clientNonce() == 0L
             || (payload.capabilities() & ~SUPPORTED_CAPABILITIES) != 0L
             || (payload.capabilities() & DesktopPackets.CAP_MULTI_MENU_GESTURES) == 0L) {
-            Component reason = Component.literal("Salt's Inventory Update versions do not match. Update the mod on both client and server.");
+            Component reason = Component.translatable("warn.salts_inventory_update.protocol.mismatch");
             DesktopDebug.warn(
                 "server desktop handshake rejected player={} protocol={} expected={} capabilities={} required={}",
                 player.getName().getString(), payload.protocolVersion(), DesktopProtocol.VERSION,
@@ -918,7 +918,7 @@ public final class DesktopContainerSessions {
             sessions.links.clear();
         }
         DesktopDebug.warn("server rejected legacy desktop-ready packet player={} expectedProtocol={}", player.getName().getString(), DesktopProtocol.VERSION);
-        player.connection.disconnect(Component.literal("Salt's Inventory Update is incompatible. Update the mod on both client and server."));
+        player.connection.disconnect(Component.translatable("warn.salts_inventory_update.protocol.incompatible"));
     }
 
     private static void disconnect(ServerPlayer player) {
@@ -1276,7 +1276,15 @@ public final class DesktopContainerSessions {
         Slot anchor = anchorAuthorization == null
             ? null
             : DesktopMenuSlots.slot(anchorAuthorization.menu(), payload.anchorSlotIndex());
-        ItemStack carried = player.inventoryMenu.getCarried().copy();
+        boolean cursorWasEmpty = player.inventoryMenu.getCarried().isEmpty();
+        ItemStack carried = anchorAuthorization == null
+            ? ItemStack.EMPTY
+            : preparePickupAllCarried(player, sessions, anchorAuthorization.menu(), payload.anchorSlotIndex(), payload.button());
+        if (cursorWasEmpty && !carried.isEmpty()) {
+            // The preceding placement may have emptied the cursor after the client chose
+            // collect-all. Publish the native pickup even if no additional items are found.
+            broadcastGesture(player, sessions);
+        }
         if (anchor == null
             || carried.isEmpty()
             || anchor.hasItem() && anchor.mayPickup(player)
@@ -1428,6 +1436,27 @@ public final class DesktopContainerSessions {
                 player.getName().getString(), sources.size(), candidates.size(), carried.getCount() - before, carried
             );
         }
+    }
+
+    private static ItemStack preparePickupAllCarried(
+        ServerPlayer player, PlayerSessions sessions, AbstractContainerMenu menu, int slotIndex, int button
+    ) {
+        ItemStack carried = player.inventoryMenu.getCarried().copy();
+        if (!carried.isEmpty()) {
+            return carried;
+        }
+        Slot anchor = DesktopMenuSlots.slot(menu, slotIndex);
+        if (button != 0 || anchor == null || !menu.stillValid(player)
+            || !anchor.isActive() || anchor.isFake() || !anchor.hasItem() || !anchor.mayPickup(player)
+            || DesktopItemSourceLocks.isSlotLocked(player, anchor)
+            || !DesktopMenuSlots.allowsPickupAllAnchor(menu, anchor.getItem(), anchor)
+            || !sessions.allowOperation(player, "pickup-all-anchor", 1.0D)) {
+            return ItemStack.EMPTY;
+        }
+        // Resolve the double-click against the canonical cursor. Use the ordinary menu
+        // click so extraction callbacks, result slots, and shared-cursor ownership survive.
+        clickMenu(0, player, sessions, menu, slotIndex, 0, ClickType.PICKUP, ItemStack.EMPTY);
+        return player.inventoryMenu.getCarried().copy();
     }
 
     private static void verifyPickupSources(List<PickupTargetPlan> plans) {

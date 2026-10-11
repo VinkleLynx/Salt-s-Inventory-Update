@@ -295,8 +295,8 @@ public final class DesktopContainerClient {
         Minecraft minecraft = Minecraft.getInstance();
         DesktopDebug.warn("client desktop protocol connection rejected reason={}", reason);
         if (minecraft.getConnection() != null) {
-            minecraft.getConnection().getConnection().disconnect(Component.literal(
-                "Salt's Inventory Update network protocol error."
+            minecraft.getConnection().getConnection().disconnect(Component.translatable(
+                "warn.salts_inventory_update.protocol.error"
             ));
         }
     }
@@ -315,7 +315,7 @@ public final class DesktopContainerClient {
         if (!accepted) {
             CONNECTION_STATE.markIncompatible();
             SaltsInventoryRuntime.setServerDesktopAvailable(false);
-            notifyIncompatible(Minecraft.getInstance(), "the server rejected desktop protocol v" + DesktopProtocol.VERSION);
+            notifyIncompatible(Minecraft.getInstance(), Component.translatable("warn.salts_inventory_update.protocol.rejected").getString() + DesktopProtocol.VERSION);
             DesktopDebug.warn(
                 "client desktop negotiation rejected protocol={} echoedNonce={} accepted={}",
                 payload.protocolVersion(),
@@ -597,10 +597,10 @@ public final class DesktopContainerClient {
     }
 
     private static void rejectLegacyConnection(Minecraft minecraft) {
-        Component message = Component.literal(
-            "Salts Inventory Update versions are incompatible. Update the mod on both client and server."
+        Component message = Component.translatable(
+            "warn.salts_inventory_update.protocol.mismatch"
         );
-        notifyIncompatible(minecraft, "the server uses the legacy desktop protocol; update the mod on both sides");
+        notifyIncompatible(minecraft, Component.translatable("warn.salts_inventory_update.protocol.legacy").getString());
         if (minecraft.getConnection() != null) {
             minecraft.getConnection().getConnection().disconnect(message);
         }
@@ -612,7 +612,7 @@ public final class DesktopContainerClient {
         }
         incompatibilityNotified = true;
         minecraft.player.displayClientMessage(
-            Component.literal("Salts Inventory Update is disabled for this connection: " + reason + "."),
+            Component.translatable("warn.salts_inventory_update.protocol.disabled" + reason + "."),
             false
         );
     }

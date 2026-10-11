@@ -1513,7 +1513,12 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         PendingQuickMoveAll delayedQuickMoveAll = this.pendingQuickMoveAll;
         if (!ItemStack.matches(this.sharedCarried, copy)) {
             DesktopDebug.trace("client carried desktop={} old={} new={}", this.desktopId, this.sharedCarried, copy);
-            this.clearSlotInteractionState("carried-sync");
+            // A reply to an earlier placement can arrive while the next click/drag is held.
+            // Keep that gesture when only the count changes; its preview and commit use the
+            // latest count. A different cursor item (or an empty cursor) invalidates it.
+            if (copy.isEmpty() || !ItemStack.isSameItemSameComponents(this.sharedCarried, copy)) {
+                this.clearSlotInteractionState("carried-sync");
+            }
         }
 
         this.sharedCarried = copy;
@@ -2832,20 +2837,26 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             return;
         }
 
-        if (this.dragDistribution == null) {
-            this.dragDistribution = new DragDistribution(pending.button(), pending.quickCraftType());
+        DragDistribution drag = this.dragDistribution;
+        if (drag == null) {
+            // Movement inside the pressed slot is still an ordinary placement click.
+            if (SlotKey.of(hit).equals(SlotKey.of(pending.hit()))) {
+                return;
+            }
+            drag = new DragDistribution(pending.button(), pending.quickCraftType());
             if (this.canDragDistributeTo(pending.hit())) {
-                this.dragDistribution.add(pending.hit());
+                drag.add(pending.hit());
             }
         }
 
-        if (!this.canAddDragDistributionSlot(this.dragDistribution, hit)) {
+        if (!this.canAddDragDistributionSlot(drag, hit)) {
             DesktopDebug.trace("client pending drag hover ignored desktop={} x={} y={} reason=carried-limit carried={} hit={}", this.desktopId, mouseX, mouseY, this.sharedCarried, this.describeSlotHit(hit));
             return;
         }
 
-        this.dragDistribution.add(hit);
-        DesktopDebug.trace("client pending drag add desktop={} size={} hit={}", this.desktopId, this.dragDistribution.size(), this.describeSlotHit(hit));
+        drag.add(hit);
+        this.dragDistribution = drag;
+        DesktopDebug.trace("client pending drag add desktop={} size={} hit={}", this.desktopId, drag.size(), this.describeSlotHit(hit));
     }
 
     private void completePendingSlotClick() {
@@ -3104,6 +3115,10 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         for (SlotHit hit : drag.slots()) {
             if (this.canDragDistributeTo(hit)) {
                 targets.add(hit);
+                if (drag.quickCraftType() != AbstractContainerMenu.QUICKCRAFT_TYPE_CLONE
+                    && targets.size() >= this.sharedCarried.getCount()) {
+                    break;
+                }
             }
         }
         return targets;
@@ -3698,6 +3713,11 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         }
 
         InventoryWindow window = this.windowAt(x, y);
+        if (window != null && !window.minimized && window.kind == WindowKind.INSTRUCTIONS) {
+            this.scrollInstructionsWindow(window, scrollY);
+            return true;
+        }
+
         if (window != null && !window.minimized && window.kind == WindowKind.RECIPE_BROWSER_VIEW) {
             this.scrollRecipeBrowserView(window, x, y, scrollX, scrollY);
             return true;
@@ -9937,17 +9957,29 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         graphics.text(this.font, page.title(), textX, textY, this.uiColor(COLOR_TEXT), false);
         graphics.fill(textX, textY + 13, panelX + panelWidth - INSTRUCTIONS_INNER_PADDING, textY + 14, this.uiColor(0xFF3F4652));
 
-        int lineY = textY + 22;
         int contentX = panelX + INSTRUCTIONS_INNER_PADDING;
-        int contentWidth = panelWidth - INSTRUCTIONS_INNER_PADDING * 2;
-        int navY = this.instructionsPreviousButtonRect(window).y();
+        int contentWidth = panelWidth - INSTRUCTIONS_INNER_PADDING * 2 - 7;
+        int contentTop = textY + 22;
+        int contentBottom = this.instructionsPreviousButtonRect(window).y() - INSTRUCTIONS_SECTION_GAP;
+        int viewportHeight = Math.max(1, contentBottom - contentTop);
+        int contentHeight = this.instructionsContentHeight(page, contentWidth);
+        int maxScroll = Math.max(0, contentHeight - viewportHeight);
+        window.instructionsScroll = clamp(window.instructionsScroll, 0, maxScroll);
+
+        graphics.enableScissor(contentX, contentTop, contentX + contentWidth, contentBottom);
+        int lineY = contentTop - window.instructionsScroll;
         for (InstructionsSection section : page.sections(recipeBrowserInstalled)) {
-            int sectionHeight = this.instructionsSectionHeight(section, contentWidth);
-            if (lineY + sectionHeight > navY - INSTRUCTIONS_SECTION_GAP) {
-                break;
-            }
             this.renderInstructionsSection(graphics, section, contentX, lineY, contentWidth);
-            lineY += sectionHeight + INSTRUCTIONS_SECTION_GAP;
+            lineY += this.instructionsSectionHeight(section, contentWidth) + INSTRUCTIONS_SECTION_GAP;
+        }
+        graphics.disableScissor();
+
+        if (maxScroll > 0) {
+            int trackX = panelX + panelWidth - INSTRUCTIONS_INNER_PADDING - 4;
+            int thumbHeight = Math.max(18, viewportHeight * viewportHeight / contentHeight);
+            int thumbY = contentTop + (viewportHeight - thumbHeight) * window.instructionsScroll / maxScroll;
+            graphics.fill(trackX, contentTop, trackX + 3, contentBottom, this.uiColor(0xFF323946));
+            graphics.fill(trackX, thumbY, trackX + 3, thumbY + thumbHeight, this.uiColor(COLOR_MUTED_TEXT));
         }
 
         if (pages.size() > 1) {
@@ -9973,6 +10005,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         int nextPage = window.instructionsPage + button.direction();
         if (nextPage >= 0 && nextPage < pages.size()) {
             window.instructionsPage = nextPage;
+            window.instructionsScroll = 0;
         }
         return true;
     }
@@ -9981,8 +10014,18 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         List<InstructionsPage> pages = new ArrayList<>();
         pages.add(InstructionsPage.DESKTOP);
         pages.add(InstructionsPage.CONTROLS);
-        pages.add(InstructionsPage.WINDOWS);
+        pages.add(InstructionsPage.ITEMS);
+        pages.add(InstructionsPage.ARRANGE);
+        pages.add(InstructionsPage.BUTTONS);
+        pages.add(InstructionsPage.MORE_BUTTONS);
+        pages.add(InstructionsPage.SORT);
+        pages.add(InstructionsPage.SORT_SOURCES);
         pages.add(InstructionsPage.INVENTORY);
+        pages.add(InstructionsPage.SETTINGS_START);
+        pages.add(InstructionsPage.SETTINGS_LAYOUT);
+        pages.add(InstructionsPage.SETTINGS_PINS);
+        pages.add(InstructionsPage.SETTINGS_BEHAVIOR);
+        pages.add(InstructionsPage.SETTINGS_ADVANCED);
         if (this.isRecipeBrowserInstalled()) {
             pages.add(InstructionsPage.JEI);
         }
@@ -10013,6 +10056,25 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         int desiredHeight = TOP_BAR_HEIGHT + WINDOW_CONTENT_PADDING * 2 + panelHeight;
         int maxHeight = Math.max(INSTRUCTIONS_WINDOW_HEIGHT, this.desktopHeight() - WINDOW_PLACEMENT_MARGIN * 2);
         return clamp(desiredHeight, INSTRUCTIONS_WINDOW_HEIGHT, maxHeight);
+    }
+
+    private int instructionsContentHeight(InstructionsPage page, int width) {
+        int height = 0;
+        for (InstructionsSection section : page.sections(this.isRecipeBrowserInstalled())) {
+            height += this.instructionsSectionHeight(section, width) + INSTRUCTIONS_SECTION_GAP;
+        }
+        return Math.max(0, height - INSTRUCTIONS_SECTION_GAP);
+    }
+
+    private void scrollInstructionsWindow(InventoryWindow window, double scrollY) {
+        List<InstructionsPage> pages = this.instructionsPages();
+        InstructionsPage page = pages.get(clamp(window.instructionsPage, 0, pages.size() - 1));
+        int panelWidth = window.width - WINDOW_CONTENT_PADDING * 2;
+        int contentWidth = panelWidth - INSTRUCTIONS_INNER_PADDING * 2 - 7;
+        int contentTop = window.contentY() + INSTRUCTIONS_INNER_PADDING + 22;
+        int contentBottom = this.instructionsPreviousButtonRect(window).y() - INSTRUCTIONS_SECTION_GAP;
+        int maxScroll = Math.max(0, this.instructionsContentHeight(page, contentWidth) - Math.max(1, contentBottom - contentTop));
+        window.instructionsScroll = clamp(window.instructionsScroll + (scrollY < 0.0 ? 24 : -24), 0, maxScroll);
     }
 
     private int instructionsSectionHeight(InstructionsSection section, int width) {
@@ -10187,9 +10249,9 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         renderSlotBackground(graphics, x, y);
         switch (page) {
             case DESKTOP -> renderNineSlice(graphics, WINDOW_TEXTURE, x + 3, y + 3, 12, 12);
-            case CONTROLS -> blitRegion(graphics, WINDOW_CONTROLS_TEXTURE, x + 3, y + 3, 0, 0, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_TEXTURE_WIDTH, CONTROL_TEXTURE_HEIGHT);
-            case WINDOWS -> blitRegion(graphics, WINDOW_CONTROLS_TEXTURE, x + 3, y + 3, 6 * CONTROL_SIZE, 0, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_TEXTURE_WIDTH, CONTROL_TEXTURE_HEIGHT);
-            case INVENTORY -> blitRegion(graphics, SLOT_TEXTURE, x, y, 0, 0, SLOT_SIZE, SLOT_SIZE, SLOT_SIZE, SLOT_SIZE, SLOT_TEXTURE_WIDTH, SLOT_TEXTURE_HEIGHT);
+            case CONTROLS, BUTTONS, MORE_BUTTONS, SORT, SORT_SOURCES -> blitRegion(graphics, WINDOW_CONTROLS_TEXTURE, x + 3, y + 3, 0, 0, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_TEXTURE_WIDTH, CONTROL_TEXTURE_HEIGHT);
+            case ITEMS, INVENTORY -> blitRegion(graphics, SLOT_TEXTURE, x, y, 0, 0, SLOT_SIZE, SLOT_SIZE, SLOT_SIZE, SLOT_SIZE, SLOT_TEXTURE_WIDTH, SLOT_TEXTURE_HEIGHT);
+            case ARRANGE, SETTINGS_START, SETTINGS_LAYOUT, SETTINGS_PINS, SETTINGS_BEHAVIOR, SETTINGS_ADVANCED -> blitRegion(graphics, WINDOW_CONTROLS_TEXTURE, x + 3, y + 3, 6 * CONTROL_SIZE, 0, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_SIZE, CONTROL_TEXTURE_WIDTH, CONTROL_TEXTURE_HEIGHT);
             case JEI -> graphics.centeredText(this.font, "J", x + INSTRUCTIONS_ICON_SIZE / 2, y + 5, this.uiColor(COLOR_TEXT));
             case TOMS_STORAGE -> graphics.centeredText(this.font, "T", x + INSTRUCTIONS_ICON_SIZE / 2, y + 5, this.uiColor(COLOR_TEXT));
         }
@@ -16340,169 +16402,219 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         INSTRUCTIONS
     }
 
-    private enum InstructionsPage {
-        DESKTOP(
-            Component.translatable("instructions.salts_inventory_update.desktop.title").getString(),
-            List.of(
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.desktop.welcome.2").getString()
+    private enum InstructionsPage { // edit mark
+        DESKTOP(Component.translatable("instructions.salts_inventory_update.desktop.welcome.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.desktop.welcome.inventory.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.desktop.welcome.inventory.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.desktop.welcome.inventory.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.desktop.stay.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.desktop.stay.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.desktop.stay.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.desktop.stay.3").getString()
+            )
+        )),
+        CONTROLS(Component.translatable("instructions.salts_inventory_update.control.title").getString(), List.of(
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.control.default.title").getString(),
+                InstructionsLine.bind("E", Component.translatable("instructions.salts_inventory_update.control.keys.inventory").getString()),
+                InstructionsLine.bind("C", Component.translatable("instructions.salts_inventory_update.control.keys.character").getString()),
+                InstructionsLine.bind("H", Component.translatable("instructions.salts_inventory_update.control.keys.recipe").getString())
+            ),
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.control.leave.title").getString(),
+                InstructionsLine.bind(
+                    Component.translatable("key.salts_inventory_update.hold").getString() +
+                    " E",
+                    Component.translatable("instructions.salts_inventory_update.control.keys.closeall").getString()
                 ),
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.desktop.change.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.desktop.change.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.desktop.change.2").getString()
+                InstructionsLine.bind("Esc", Component.translatable("instructions.salts_inventory_update.control.keys.close").getString()),
+                InstructionsLine.mouseFocus(Component.translatable("instructions.salts_inventory_update.control.keys.mouse").getString())
+            )
+        )),
+        ITEMS(Component.translatable("instructions.salts_inventory_update.items.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.items.vanilla.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.items.vanilla.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.items.vanilla.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.items.vanilla.3").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.items.world.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.items.world.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.items.world.2").getString()
+            )
+        )),
+        ARRANGE(Component.translatable("instructions.salts_inventory_update.arrage.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.arrage.move.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.arrage.move.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.arrage.move.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.arrage.move.3").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.arrage.layout.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.arrage.layout.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.arrage.layout.2").getString()
+            )
+        )),
+        BUTTONS(Component.translatable("instructions.salts_inventory_update.buttons.title").getString(), List.of(
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.buttons.titlebar.title").getString(),
+                InstructionsLine.control(WindowControl.FOCUS,
+                    Component.translatable("instructions.salts_inventory_update.buttons.focus").getString()
                 ),
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.desktop.reopen.1").getString()
+                InstructionsLine.control(WindowControl.PIN,
+                    Component.translatable("instructions.salts_inventory_update.buttons.pin").getString()
+                ),
+                InstructionsLine.control(WindowControl.LOCK,
+                    Component.translatable("instructions.salts_inventory_update.buttons.lock").getString()
+                ),
+                InstructionsLine.control(WindowControl.ELLIPSIS,
+                    Component.translatable("instructions.salts_inventory_update.buttons.ellipsis").getString()
                 )
             )
-        ),
-        CONTROLS(
-           Component.translatable("instructions.salts_inventory_update.control.title").getString(),
-            List.of(
-                InstructionsSection.binds(
-                    Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
-                    InstructionsLine.bind(
-                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
-                        Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
-                    ),
-                    InstructionsLine.bind(
-                        WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
-                        Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
-                    ),
-                    InstructionsLine.bind(
-                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
-                        Component.translatable("instructions.salts_inventory_update.control.open.jei").getString()
-                    )
+        )),
+        MORE_BUTTONS(Component.translatable("instructions.salts_inventory_update.more_buttons.title").getString(), List.of(
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.more_buttons.controls.title").getString(),
+                InstructionsLine.control(WindowControl.LINK,
+                    Component.translatable("instructions.salts_inventory_update.buttons.link").getString()
                 ),
-                InstructionsSection.binds(
-                    Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
-                    InstructionsLine.bind(
-                        Component.literal(
-                            Component.translatable("key.salts_inventory_update.hold").getString() +
-                            " " +
-                            Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
-                        ).getString(),
-                        Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
-                    ),
-                    InstructionsLine.mouseFocus(
-                        Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
-                    ),
-                    InstructionsLine.bind(
-                        "Esc",
-                        Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
-                    )
-                )
-            )
-        ),
-        WINDOWS(
-            Component.translatable("instructions.salts_inventory_update.windows.title").getString(),
-            List.of(
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.windows.move.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.windows.move.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.windows.move.2").getString(),
-                    Component.translatable("instructions.salts_inventory_update.windows.move.3").getString()
+                InstructionsLine.control(WindowControl.MINIMIZE,
+                    Component.translatable("instructions.salts_inventory_update.buttons.minimize").getString()
                 ),
-                InstructionsSection.binds(//this whole section disapper, why?? //need more vertical space
-                    Component.translatable("instructions.salts_inventory_update.windows.buttons.title").getString(),
-                    InstructionsLine.control(WindowControl.FOCUS, Component.translatable("instructions.salts_inventory_update.windows.buttons.focus").getString()),
-                    InstructionsLine.control(WindowControl.PIN, Component.translatable("instructions.salts_inventory_update.windows.buttons.pin").getString()),
-                    InstructionsLine.control(WindowControl.LOCK, Component.translatable("instructions.salts_inventory_update.windows.buttons.lock").getString()),
-                    InstructionsLine.control(WindowControl.LINK, Component.translatable("instructions.salts_inventory_update.windows.buttons.link").getString()),
-                    InstructionsLine.control(WindowControl.MINIMIZE, Component.translatable("instructions.salts_inventory_update.windows.buttons.minimize").getString()),
-                    InstructionsLine.control(WindowControl.CLOSE, Component.translatable("instructions.salts_inventory_update.windows.buttons.close").getString())
+                InstructionsLine.control(WindowControl.CLOSE,
+                    Component.translatable("instructions.salts_inventory_update.buttons.close").getString()
                 )
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.more_buttons.mounted.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.more_buttons.mounted.1").getString()
             )
-        ),
-        INVENTORY(
-            Component.translatable("instructions.salts_inventory_update.inventory.title").getString(),
-            List.of(
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.inventory.hotbar.2").getString()
+        )),
+        SORT(Component.translatable("instructions.salts_inventory_update.sort.title").getString(), List.of(
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.sort.button.title").getString(),
+                InstructionsLine.control(WindowControl.SORT_WINDOWS,
+                    Component.translatable("instructions.salts_inventory_update.buttons.sort").getString()
+                )
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.sort.normal.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort.normal.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort.normal.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.sort.shift.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort.shift.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort.shift.2").getString()
+            )
+        )),
+        SORT_SOURCES(Component.translatable("instructions.salts_inventory_update.sort_source.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.sort_source.slot.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort_source.slot.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort_source.slot.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.sort_source.target.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort_source.target.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.sort_source.target.2").getString()
+            )
+        )),
+        INVENTORY(Component.translatable("instructions.salts_inventory_update.inventory.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.inventory.character.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.inventory.character.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.inventory.character.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.inventory.extra.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.inventory.extra.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.inventory.extra.2").getString()
+            )
+        )),
+        SETTINGS_START(Component.translatable("instructions.salts_inventory_update.settings_start.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_start.open.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_start.open.1").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_start.gameplay.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_start.gameplay.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_start.gameplay.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_start.gameplay.3").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_start.gameplay.4").getString()
+            )
+        )),
+        SETTINGS_LAYOUT(Component.translatable("instructions.salts_inventory_update.settings_layout.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_layout.new_windows.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_layout.new_windows.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_layout.new_windows.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_layout.geometry.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_layout.geometry.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_layout.geometry.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_layout.geometry.3").getString()
+            )
+        )),
+        SETTINGS_PINS(Component.translatable("instructions.salts_inventory_update.settings_pins.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_pins.options.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_pins.options.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_pins.options.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_pins.options.3").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_pins.ghost.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_pins.geometry.1").getString()
+            )
+        )),
+        SETTINGS_BEHAVIOR(Component.translatable("instructions.salts_inventory_update.settings_behavior.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_behavior.open_close.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_behavior.open_close.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_behavior.open_close.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_behavior.open_close.3").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_behavior.open_close.4").getString()
+            )
+        )),
+        SETTINGS_ADVANCED(Component.translatable("instructions.salts_inventory_update.settings_advanced.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_advanced.modded.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_advanced.modded.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_advanced.modded.2").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_advanced.modded.3").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.settings_advanced.troubleshoot.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_advanced.troubleshoot.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.settings_advanced.troubleshoot.2").getString()
+            )
+        )),
+        JEI(Component.translatable("instructions.salts_inventory_update.jei.title").getString(), List.of(
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.jei.installed.title").getString(),
+                InstructionsLine.bind("H",
+                    Component.translatable("instructions.salts_inventory_update.jei.installed.1").getString()
                 ),
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.inventory.expandable.2").getString()
+                InstructionsLine.binds(List.of("R", "U"),
+                    Component.translatable("instructions.salts_inventory_update.jei.installed.2").getString()
                 )
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.jei.craft.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.jei.craft.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.jei.craft.2").getString()
             )
-        ),
-        JEI(
-            Component.translatable("instructions.salts_inventory_update.jei.title").getString(),
-            List.of(
-                InstructionsSection.binds(
-                    Component.translatable("instructions.salts_inventory_update.jei.search.title").getString(),
-                    InstructionsLine.bind(
-                        WindowedInventoryClient.jeiWindowKey().getTranslatedKeyMessage().getString(),
-                        Component.translatable("instructions.salts_inventory_update.jei.search.1").getString()
-                    ),
-                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.search.2").getString())
-                ),
-                InstructionsSection.binds(
-                    Component.translatable("instructions.salts_inventory_update.jei.recipe.title").getString(),
-                    InstructionsLine.binds(
-                        List.of(
-                            "U",
-                            "R"
-                        ),
-                        Component.translatable("instructions.salts_inventory_update.jei.recipe.1").getString()
-                    ),
-                    InstructionsLine.text(Component.translatable("instructions.salts_inventory_update.jei.recipe.2").getString())
-                )
+        )),
+        TOMS_STORAGE(Component.translatable("instructions.salts_inventory_update.toms.title").getString(), List.of(
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.toms.installed.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.toms.installed.1").getString(),
+                Component.translatable("instructions.salts_inventory_update.toms.installed.2").getString()
+            ),
+            InstructionsSection.text(Component.translatable("instructions.salts_inventory_update.toms.supported.title").getString(),
+                Component.translatable("instructions.salts_inventory_update.toms.supported.1").getString()
             )
-        ),
-        TOMS_STORAGE(
-            Component.translatable("instructions.salts_inventory_update.toms.title").getString(),
-            List.of(
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.toms.terminals.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.toms.terminals.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.toms.terminals.2").getString()
-                ),
-                InstructionsSection.text(
-                    Component.translatable("instructions.salts_inventory_update.toms.supported.title").getString(),
-                    Component.translatable("instructions.salts_inventory_update.toms.supported.1").getString(),
-                    Component.translatable("instructions.salts_inventory_update.toms.supported.2").getString()
-                )
-            )
-        );
+        ));
 
         private final String title;
         private final List<InstructionsSection> sections;
         private static final List<InstructionsSection> CONTROLS_WITHOUT_JEI_SECTIONS = List.of(
-            InstructionsSection.binds(
-                Component.translatable("instructions.salts_inventory_update.control.open.title").getString(),
-                InstructionsLine.bind(
-                    Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString(),
-                    Component.translatable("instructions.salts_inventory_update.control.open.inventory").getString()
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.control.default.title").getString(),
+                InstructionsLine.bind("E",
+                    Component.translatable("instructions.salts_inventory_update.control.keys.inventory").getString()
                 ),
-                InstructionsLine.bind(
-                    WindowedInventoryClient.characterWindowKey().getTranslatedKeyMessage().getString(),
-                    Component.translatable("instructions.salts_inventory_update.control.open.character").getString()
+                InstructionsLine.bind("C",
+                    Component.translatable("instructions.salts_inventory_update.control.keys.character").getString()
                 )
             ),
-            InstructionsSection.binds(
-                Component.translatable("instructions.salts_inventory_update.control.desktop.title").getString(),
+            InstructionsSection.binds(Component.translatable("instructions.salts_inventory_update.control.leave.title").getString(),
                 InstructionsLine.bind(
-                    Component.literal(
-                        Component.translatable("key.salts_inventory_update.hold").getString() +
-                        " " +
-                        Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString()
-                    ).getString(),
-                    Component.translatable("instructions.salts_inventory_update.control.desktop.closeall").getString()
+                    Component.translatable("key.salts_inventory_update.hold").getString() +
+                    " E",
+                    Component.translatable("instructions.salts_inventory_update.control.keys.closeall").getString()
                 ),
-                InstructionsLine.mouseFocus(
-                    Component.translatable("instructions.salts_inventory_update.control.desktop.mouse").getString()
+                InstructionsLine.bind("Esc",
+                    Component.translatable("instructions.salts_inventory_update.control.keys.close").getString()
                 ),
-                InstructionsLine.bind(
-                    "Esc",
-                    Component.translatable("instructions.salts_inventory_update.control.desktop.close").getString()
+                InstructionsLine.mouseFocus(Component.translatable("instructions.salts_inventory_update.control.keys.mouse").getString()
                 )
             )
         );
@@ -16516,15 +16628,8 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
             return this.title;
         }
 
-        private List<InstructionsSection> sections() {
-            return this.sections;
-        }
-
         private List<InstructionsSection> sections(boolean recipeBrowserInstalled) {
-            if (this == CONTROLS && !recipeBrowserInstalled) {
-                return CONTROLS_WITHOUT_JEI_SECTIONS;
-            }
-            return this.sections();
+            return this == CONTROLS && !recipeBrowserInstalled ? CONTROLS_WITHOUT_JEI_SECTIONS : this.sections;
         }
     }
 
@@ -17733,6 +17838,7 @@ public final class InventoryDesktopScreen extends Screen implements MenuAccess {
         private final DesktopTextBoxState jeiSearchBox = new DesktopTextBoxState();
         private int jeiScrollRow;
         private int instructionsPage;
+        private int instructionsScroll;
         private RecipeBrowserMode jeiMode = RecipeBrowserMode.INGREDIENTS;
         private @Nullable RecipeBrowserEntry jeiFocusEntry;
         private String jeiSelectedRecipeCategoryUid = "";

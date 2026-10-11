@@ -192,7 +192,7 @@ public final class DesktopContainerSessions {
                     player,
                     DesktopPackets.LEGACY_READY_TYPE,
                     "legacy desktop protocol",
-                    Component.literal("Salts Inventory Update versions are incompatible. Update the mod on both client and server.")
+                    Component.translatable("warn.salts_inventory_update.protocol.incompatible")
                 );
             } catch (RuntimeException | StackOverflowError exception) {
                 rejectMalformedPayload(server, player, DesktopPackets.LEGACY_READY_TYPE, exception);
@@ -270,7 +270,7 @@ public final class DesktopContainerSessions {
             player,
             id,
             reason,
-            Component.literal("Salt's Inventory Update network protocol error.")
+            Component.translatable("warn.salts_inventory_update.protocol.error")
         );
     }
 
@@ -976,12 +976,19 @@ public final class DesktopContainerSessions {
         PlayerSessions sessions = existingSessions(player);
         if (sessions == null || !sessions.isReady() || player.isSpectator()) return;
         ItemStack carried = player.inventoryMenu.getCarried().copy();
-        if (carried.isEmpty() || DesktopItemSourceLocks.matchesLockedSource(player, carried)) return;
+        if (DesktopItemSourceLocks.matchesLockedSource(player, carried)) return;
         List<AbstractContainerMenu> menus = new ArrayList<>();
+        AbstractContainerMenu anchorMenu = null;
         for (DesktopSessionReference reference : payload.sources()) {
             AbstractContainerMenu menu = authorizedMenu(player, sessions, reference.sessionId(), reference.sessionToken(), reference.stateId());
             if (menu == null) return;
             menus.add(menu);
+            if (reference.sessionId() == payload.anchorSessionId()) anchorMenu = menu;
+        }
+        if (carried.isEmpty()) {
+            if (anchorMenu == null) return;
+            carried = preparePickupAllCarried(player, sessions, anchorMenu, payload.anchorSlotIndex(), payload.button());
+            if (carried.isEmpty()) return;
         }
         for (int pass = 0; pass < 2 && carried.getCount() < carried.getMaxStackSize(); pass++) {
             for (AbstractContainerMenu menu : menus) {
@@ -1002,6 +1009,24 @@ public final class DesktopContainerSessions {
         }
         setSharedCarried(player, sessions, carried);
         sessions.broadcastAll(player);
+    }
+
+    private static ItemStack preparePickupAllCarried(
+        ServerPlayer player, PlayerSessions sessions, AbstractContainerMenu menu, int slotIndex, int button
+    ) {
+        ItemStack carried = player.inventoryMenu.getCarried().copy();
+        if (!carried.isEmpty()) return carried;
+        Slot anchor = DesktopMenuSlots.slot(menu, slotIndex);
+        if (button != 0 || anchor == null || !menu.stillValid(player)
+            || !anchor.isActive() || !anchor.hasItem() || !anchor.mayPickup(player)
+            || DesktopItemSourceLocks.isSlotLocked(player, anchor)
+            || !DesktopMenuSlots.allowsPickupAllAnchor(menu, anchor.getItem(), anchor)) {
+            return ItemStack.EMPTY;
+        }
+        // A fast place-then-double-click can reach the server with an empty cursor.
+        // Preserve native extraction callbacks and canonical cursor ownership.
+        clickMenu(0, player, sessions, menu, slotIndex, 0, ClickType.PICKUP, ItemStack.EMPTY);
+        return player.inventoryMenu.getCarried().copy();
     }
 
     private record SortDestination(SessionAuthorization authorization, List<Slot> slots, List<ItemStack> contents) {}

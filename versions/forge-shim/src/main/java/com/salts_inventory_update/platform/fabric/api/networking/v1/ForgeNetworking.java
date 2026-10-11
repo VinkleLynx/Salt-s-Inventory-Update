@@ -108,7 +108,7 @@ public final class ForgeNetworking {
     }
 
     private static void rejectProtocol(NetworkEvent.Context context, ResourceLocation id, String reason) {
-        Component message = Component.literal("Salt's Inventory Update network protocol error.");
+        Component message = Component.translatable("warn.salts_inventory_update.protocol.error");
         boolean closed = false;
         if (context.getDirection() == NetworkDirection.PLAY_TO_SERVER) {
             ServerPlayer sender = context.getSender();
