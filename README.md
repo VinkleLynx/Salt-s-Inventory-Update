@@ -1,7 +1,8 @@
 # Attention
 
 This is not the official version of [Salt's Inventory Update](https://github.com/Salt-and-Fries/Salt-s-Inventory-Update).
-If an error occurs, please switch to the official version first: [modrinth](https://modrinth.com/mod/salts-inventory-update)
+If any error occurs, please switch to the official version first: [modrinth](https://modrinth.com/mod/salts-inventory-update)
+If the error is caused by this fork, do not report to the original author.
 
 # Salt's Inventory Update
 
