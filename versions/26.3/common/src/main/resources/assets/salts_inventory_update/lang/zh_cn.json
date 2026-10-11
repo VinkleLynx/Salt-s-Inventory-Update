@@ -71,6 +71,10 @@
 
   "mark": "this is a mark",
 
+  "narration.salts_inventory_update.management_control": "按下回车或空格激活。按下 Tab 移动到下一个控件。",
+  "tooltip.salts_inventory_update.window_control.restore": "恢复",
+  "tooltip.salts_inventory_update.window_control.unpin": "取消固定",
+
   "config.salts_inventory_update.recipe_browser.clear": "清除默认配方浏览器",
   "config.salts_inventory_update.recipe_browser.set": "设置为默认配方浏览器",
 

@@ -71,6 +71,10 @@
 
   "mark": "this is a mark",
 
+  "narration.salts_inventory_update.management_control": "Press Enter or Space to activate. Press Tab to move to the next control.",
+  "tooltip.salts_inventory_update.window_control.restore": "Restore",
+  "tooltip.salts_inventory_update.window_control.unpin": "Unpin",
+
   "config.salts_inventory_update.recipe_browser.clear": "Clear default recipe browser tab",
   "config.salts_inventory_update.recipe_browser.set": "Set as default recipe browser tab",
 
