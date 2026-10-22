@@ -1,0 +1,96 @@
+// Opt-in test launcher. Removes every project implementation output from the
+// game classpath and loads production mods from an isolated mods directory.
+gradle.projectsEvaluated {
+    def root = gradle.rootProject
+    def mc = root.providers.gradleProperty('qaMinecraft').getOrElse('1.21.1')
+    if (!(mc in ['1.20.1','1.21.1','1.21.11','26.1.2','26.2','26.3'])) throw new GradleException('Unsupported packaged Fabric QA Minecraft version: ' + mc)
+    def runId = root.providers.gradleProperty('qaRunId').getOrElse('')
+    if (!(runId ==~ /[a-zA-Z0-9_-]*/)) throw new GradleException('Invalid qaRunId')
+    def suffix = runId ? '-' + runId : ''
+    def core = root.project(":${mc}:fabric")
+    def extension = root.project(":compatibility:${mc}:fabric")
+    def productionJar = { module -> module.tasks.named(module.tasks.findByName('remapJar') == null ? 'jar' : 'remapJar') }
+    def qa = core.sourceSets.create('gameplayQa')
+    qa.java.srcDir(root.file('functional-tests/src/main/java'))
+    qa.java.srcDir(root.file('functional-tests/packaged-java'))
+    qa.java.include('**/InWorldGameplayHarness*.java', '**/GameplayQaInitializer.java')
+    qa.resources.srcDir(root.file('functional-tests/packaged-resources'))
+    core.tasks.named(qa.processResourcesTaskName).configure {
+        inputs.property('minecraft', mc)
+        inputs.property('coreVersion', core.version.toString())
+        filesMatching('fabric.mod.json') { expand(minecraft: mc, coreVersion: core.version.toString()) }
+    }
+    qa.compileClasspath += core.sourceSets.main.compileClasspath + core.sourceSets.main.output
+    core.tasks.named(qa.compileJavaTaskName).configure { dependsOn(core.tasks.named('classes')) }
+    def includeExtension = root.providers.gradleProperty('qaExtension').map { it.toBoolean() }.getOrElse(false)
+    def scenario = root.providers.gradleProperty('qaScenario').getOrElse(includeExtension ? 'extension-empty' : 'core')
+    if (!(scenario in ['core','extension-empty','browser-emi','browser-jei','browser-rei','sophisticated','toms','ae2']))
+        throw new GradleException('Unsupported packaged QA scenario')
+    if (!includeExtension && scenario != 'core') throw new GradleException('Integration scenarios require qaExtension=true')
+    def tomsPickupOnly = root.providers.gradleProperty('qaTomsPickupOnly').map { it.toBoolean() }.getOrElse(false)
+    if (tomsPickupOnly && scenario != 'toms') throw new GradleException('Tom pickup focus requires the toms scenario')
+    def chestCloseOnly = root.providers.gradleProperty('qaChestCloseOnly').map { it.toBoolean() }.getOrElse(false)
+    if (chestCloseOnly && (scenario != 'core' || includeExtension))
+        throw new GradleException('Chest-close reproduction requires standalone Core QA.')
+    def run = core.tasks.named('runClient').get()
+    core.tasks.register('runPackagedGameplay', JavaExec) {
+        group = 'verification'
+        description = 'Runs disposable in-world QA against production JARs; project implementation directories are excluded.'
+        dependsOn(core.tasks.named(qa.classesTaskName), productionJar(core))
+        if (includeExtension) dependsOn(productionJar(extension))
+        dependsOn(run.taskDependencies.getDependencies(run).findAll { it.name != 'runClient' })
+        javaLauncher.set(run.javaLauncher)
+        mainClass.set(run.mainClass)
+        def folder = core.layout.buildDirectory.dir("runtime-smoke/packaged-${scenario}${suffix}").get().asFile
+        workingDir = folder
+        environment('SIU_GAMEPLAY_TESTS', 'true')
+        environment('SIU_FUNCTIONAL_TESTS', 'false')
+        environment('SIU_QA_CHEST_CLOSE_ONLY', chestCloseOnly.toString())
+        environment('SIU_QA_SCENARIO', scenario)
+        environment('SIU_QA_TOMS_PICKUP_ONLY', tomsPickupOnly.toString())
+        if (tomsPickupOnly || root.providers.gradleProperty('qaIntegrationOnly').map { it.toBoolean() }.getOrElse(false)) environment('SIU_QA_INTEGRATION_ONLY', 'true')
+        environment('SIU_FUNCTIONAL_TEST_LOADER', 'fabric')
+        environment('SIU_QA_OUTPUT', root.file("build/gameplay-qa/packaged-$scenario/${mc}-fabric${suffix}").absolutePath)
+        doFirst {
+            if (root.providers.gradleProperty('includeFunctionalTests').map { it.toBoolean() }.getOrElse(false)) {
+                throw new GradleException('Packaged QA requires production JARs without functional test sources; omit includeFunctionalTests.')
+            }
+            def projectPrefix = root.projectDir.canonicalPath + File.separator
+            classpath = run.classpath.filter { f ->
+                def path = f.canonicalPath
+                // Retain mapped Minecraft/loader caches; omit all project source outputs and API dev jars.
+                !path.startsWith(projectPrefix) || path.contains(File.separator + '.gradle' + File.separator)
+            } + qa.output
+            args = run.args + run.argumentProviders.collectMany { it.asArguments().toList() }
+            jvmArgs = (run.jvmArgs + run.jvmArgumentProviders.collectMany { it.asArguments().toList() })
+                .findAll { !it.startsWith('-Dfabric.classPathGroups=') }
+            systemProperties(run.systemProperties.findAll { k,v -> k != 'fabric.classPathGroups' })
+            systemProperty('fabric.classPathGroups', qa.output.files.collect { it.absolutePath }.join(File.pathSeparator))
+            def mods = new File(folder, 'mods')
+            mods.mkdirs()
+            // This folder is dedicated to this exact test combination.
+            mods.listFiles().findAll { it.name.endsWith('.jar') }.each { it.delete() }
+            [core, includeExtension ? extension : null].findAll { it != null }.each { module ->
+                def artifact = productionJar(module).get().archiveFile.get().asFile
+                if (root.providers.gradleProperty('qaUseDistribution').getOrElse('false') == 'true') {
+                    artifact = root.file("dist/${module == core ? 'core' : 'compatibility'}/${artifact.name}")
+                    if (!artifact.isFile()) throw new GradleException("Build production distributions before packaged QA: $artifact")
+                }
+                root.copy { from(artifact); into(mods) }
+                def hash = java.security.MessageDigest.getInstance('SHA-256').digest(artifact.bytes).encodeHex().toString()
+                println("PACKAGED_QA_ARTIFACT_SHA256=$hash ${artifact.absolutePath}")
+            }
+            def manifestPath=root.providers.gradleProperty('compatibilityQaManifest').orNull
+            if (manifestPath && root.providers.gradleProperty('compatibilityQaOriginalJars').getOrElse('false') == 'true') {
+                def manifest=new groovy.json.JsonSlurper().parse(root.file(manifestPath))
+                // Load original upstream artifacts, including their declared nested libraries.
+                // Fabric resolves and remaps them through its ordinary development mod discovery.
+                manifest.artifacts.findAll { it.coordinate }.each { artifact ->
+                    root.copy { from(root.file(artifact.path)); into(mods); rename { new File(artifact.filename).name } }
+                }
+            }
+            println('PACKAGED_QA_MODS=' + mods.listFiles().collect { it.name }.sort())
+            println('PACKAGED_QA_PROJECT_CLASSPATH=' + classpath.files.findAll { it.canonicalPath.startsWith(projectPrefix) && !it.canonicalPath.contains(File.separator + '.gradle' + File.separator) })
+        }
+    }
+}

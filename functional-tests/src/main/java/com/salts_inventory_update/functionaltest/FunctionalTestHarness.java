@@ -23,9 +23,9 @@ import com.salts_inventory_update.api.client.desktop.DesktopClientApi;
 import com.salts_inventory_update.client.SaltsInventoryConfig;
 import com.salts_inventory_update.client.WindowOpeningStyle;
 import com.salts_inventory_update.client.WindowedInventoryClient;
-import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserAccess;
-import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserBridge;
-import com.salts_inventory_update.compat.recipebrowser.RecipeBrowserSource;
+import com.salts_inventory_update.api.client.recipebrowser.RecipeBrowserAccess;
+import com.salts_inventory_update.api.client.recipebrowser.RecipeBrowserBridge;
+import com.salts_inventory_update.api.client.recipebrowser.RecipeBrowserSource;
 import com.salts_inventory_update.inventory.InventoryExpansion;
 import com.salts_inventory_update.network.DesktopPackets;
 import com.salts_inventory_update.platform.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
@@ -41,6 +41,10 @@ public final class FunctionalTestHarness {
     }
 
     public static synchronized void tryInitialize() {
+        if ("true".equalsIgnoreCase(System.getenv("SIU_GAMEPLAY_TESTS"))) {
+            InWorldGameplayHarness.initialize();
+            return;
+        }
         if (!isEnabled() || initialized) {
             return;
         }
@@ -73,6 +77,7 @@ public final class FunctionalTestHarness {
             runTest("config-normalization", recorder, FunctionalTestHarness::testConfigNormalization);
             runTest("desktop-menu-screens", recorder, FunctionalTestHarness::testDesktopMenuScreens);
             runTest("desktop-api-definitions", recorder, FunctionalTestHarness::testDesktopApiDefinitions);
+            runTest("compatibility-registrations", recorder, FunctionalTestHarness::testCompatibilityRegistrations);
             runTest("desktop-packets", recorder, FunctionalTestHarness::testDesktopPackets);
             runTest("desktop-text-editing", recorder, FunctionalTestHarness::testDesktopTextEditing);
             runTest("inventory-expansion", recorder, FunctionalTestHarness::testInventoryExpansion);
@@ -111,12 +116,18 @@ public final class FunctionalTestHarness {
     }
 
     private static void testRecipeBrowserIntegration(ResultRecorder recorder) {
-        if (!FabricLoader.getInstance().isModLoaded("emi")) {
+        FabricLoader loader = FabricLoader.getInstance();
+        if (!loader.isModLoaded("salts_inventory_compat")) {
             return;
         }
         RecipeBrowserAccess access = RecipeBrowserBridge.access();
-        recorder.check("recipe_browser.emi_selected", access.source() == RecipeBrowserSource.EMI);
-        recorder.check("recipe_browser.emi_available", access.isAvailable());
+        if (loader.isModLoaded("emi")) {
+            recorder.check("recipe_browser.emi_selected", access.source().id().equals("emi"));
+            recorder.check("recipe_browser.emi_available", access.isAvailable());
+        } else if (loader.isModLoaded("roughlyenoughitems")) {
+            recorder.check("recipe_browser.rei_selected", access.source().id().equals("roughlyenoughitems"));
+            recorder.check("recipe_browser.rei_available", access.isAvailable());
+        }
     }
 
     private static void testConfigNormalization(ResultRecorder recorder) {
@@ -130,9 +141,9 @@ public final class FunctionalTestHarness {
                 config.allowResizing = true;
                 config.enableWindowSnapping = false;
                 config.resetLockedWindows = false;
-                config.enableGhostPins = true;
+
                 config.globalPins = true;
-                config.ghostWindowOpacity = 42.0D;
+
                 config.eHoldCloseAllSeconds = 0.10D;
             });
 
@@ -142,7 +153,6 @@ public final class FunctionalTestHarness {
                 "config.window_opening_style_normalizes",
                 WindowOpeningStyle.parse("not_a_real_style").name().equals(normalized.windowOpeningStyle)
             );
-            recorder.check("config.ghost_opacity_clamps_high", normalized.ghostWindowOpacity == 0.90D);
             recorder.check("config.e_hold_seconds_clamps_low", normalized.eHoldCloseAllSeconds == 0.50D);
             recorder.check("config.global_pins_round_trips", normalized.globalPins);
         } finally {
@@ -171,13 +181,43 @@ public final class FunctionalTestHarness {
         }
     }
 
+    private static void testCompatibilityRegistrations(ResultRecorder recorder) {
+        FabricLoader loader = FabricLoader.getInstance();
+        if (!loader.isModLoaded("salts_inventory_compat")) return;
+        if (loader.isModLoaded("modmenu")) {
+            try {
+                Class<?> modMenu = Class.forName("com.terraformersmc.modmenu.ModMenu");
+                recorder.check("compatibility.modmenu.core_config_factory",
+                    Boolean.TRUE.equals(modMenu.getMethod("hasConfigScreen", String.class).invoke(null, "salts_inventory_update")));
+            } catch (ReflectiveOperationException failure) {
+                throw new IllegalStateException("Could not query Mod Menu's public config registration", failure);
+            }
+        }
+        java.util.Set<String> announced = java.util.Set.copyOf(DesktopClientApi.supportedMenuIds());
+        for (String target : List.of("sophisticatedbackpacks", "sophisticatedstorage", "toms_storage")) {
+            if (!loader.isModLoaded(target)) continue;
+            if (target.startsWith("sophisticated") && loaderLabel().equals("fabric")) continue;
+            int expected = target.equals("sophisticatedbackpacks") ? 2 : target.equals("sophisticatedstorage") ? 4 : 8;
+            long count = announced.stream().filter(id -> id.startsWith(target + ":")).count();
+            recorder.check("compatibility." + target + ".client_menu_count", count == expected);
+            if (target.equals("toms_storage")) continue; // Server registration is deferred until a world starts.
+            for (MenuType<?> type : net.minecraft.core.registries.BuiltInRegistries.MENU) {
+                var id = net.minecraft.core.registries.BuiltInRegistries.MENU.getKey(type);
+                if (id != null && id.getNamespace().equals(target) && announced.contains(id.toString())) {
+                    recorder.check("compatibility." + id + ".server",
+                        com.salts_inventory_update.api.server.desktop.DesktopServerApi.hasWindowSupport(type));
+                }
+            }
+        }
+    }
+
     private static void testDesktopPackets(ResultRecorder recorder) {
         recorder.check("packets.menu_type_round_trip.furnace", roundTrips(MenuType.FURNACE));
         MenuType<?> crafter = menuType("CRAFTER_3x3");
         if (crafter != null) {
             recorder.check("packets.menu_type_round_trip.crafter", roundTrips(crafter));
         }
-        recorder.check("packets.pin_mode_order", DesktopPackets.PIN_MODE_UNPINNED == 0 && DesktopPackets.PIN_MODE_PINNED == 1 && DesktopPackets.PIN_MODE_GHOST_PINNED == 2);
+        recorder.check("packets.pin_mode_order", java.util.Arrays.stream(com.salts_inventory_update.api.client.desktop.DesktopWindowAction.values()).noneMatch(action -> action.name().equals("MINIMIZE") || action.name().equals("GHOST")));
         recorder.check("packets.quick_target_order", DesktopPackets.QUICK_TARGET_DEFAULT == 0 && DesktopPackets.QUICK_TARGET_SESSION == 1 && DesktopPackets.QUICK_TARGET_HOTBAR == 2);
         recorder.check("packets.special_kinds",
             DesktopPackets.SPECIAL_GENERIC == 0
@@ -412,9 +452,7 @@ public final class FunctionalTestHarness {
         boolean allowResizing,
         boolean enableWindowSnapping,
         boolean resetLockedWindows,
-        boolean enableGhostPins,
         boolean globalPins,
-        double ghostWindowOpacity,
         double eHoldCloseAllSeconds
     ) {
         private static ConfigSnapshot capture(SaltsInventoryConfig.ConfigFile config) {
@@ -426,9 +464,7 @@ public final class FunctionalTestHarness {
                 config.allowResizing,
                 config.enableWindowSnapping,
                 config.resetLockedWindows,
-                config.enableGhostPins,
                 config.globalPins,
-                config.ghostWindowOpacity,
                 config.eHoldCloseAllSeconds
             );
         }
@@ -441,9 +477,9 @@ public final class FunctionalTestHarness {
             config.allowResizing = this.allowResizing;
             config.enableWindowSnapping = this.enableWindowSnapping;
             config.resetLockedWindows = this.resetLockedWindows;
-            config.enableGhostPins = this.enableGhostPins;
+
             config.globalPins = this.globalPins;
-            config.ghostWindowOpacity = this.ghostWindowOpacity;
+
             config.eHoldCloseAllSeconds = this.eHoldCloseAllSeconds;
         }
     }

@@ -2,7 +2,8 @@ package com.salts_inventory_update.protocol;
 
 /** Mapping-independent desktop protocol contract shared by every game version. */
 public final class DesktopProtocol {
-    public static final int VERSION = 4;
+    // Version 5 adds authenticated whole-workspace cleanup, including the shared cursor.
+    public static final int VERSION = 5;
     public static final int HELLO_TIMEOUT_TICKS = 100;
 
     public static final long CAP_INVENTORY_TOPOLOGY = 1L;
@@ -39,12 +40,6 @@ public final class DesktopProtocol {
     public static final int MAX_LINK_NODES = 128;
     public static final int MAX_LINK_EDGES = 512;
 
-    public static final int MAX_TOMS_COMPRESSED_BYTES = 30 * 1024;
-    public static final int MAX_TOMS_DECOMPRESSED_BYTES = 2 * 1024 * 1024;
-    public static final int MAX_TOMS_DEPTH = 64;
-    public static final int MAX_TOMS_NODES = 4_096;
-    public static final int MAX_TOMS_STRING_BYTES = 8 * 1024;
-    public static final int MAX_TOMS_PRIMITIVE_ARRAY_BYTES = 128 * 1024;
 
     private DesktopProtocol() {
     }

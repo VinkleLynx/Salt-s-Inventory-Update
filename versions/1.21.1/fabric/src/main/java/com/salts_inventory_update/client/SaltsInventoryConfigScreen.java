@@ -7,12 +7,12 @@ import java.util.function.DoubleConsumer;
 import java.util.function.DoubleFunction;
 
 import net.minecraft.client.gui.GuiGraphics;
-import com.salts_inventory_update.client.gui.GuiGraphicsExtractor;
+import com.salts_inventory_update.api.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.AbstractSliderButton;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
-import com.salts_inventory_update.client.input.MouseButtonEvent;
+import com.salts_inventory_update.api.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.CommonComponents;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.FormattedCharSequence;
@@ -79,6 +79,16 @@ public final class SaltsInventoryConfigScreen extends Screen {
             }
         );
         this.addCycle(
+            "movement_control_mode",
+            WindowMovementControls::modeValue,
+            WindowMovementControls::cycleMode
+        );
+        this.addButton(
+            "movement_control_key",
+            Component.literal(WindowedInventoryClient.mouseFocusKeyName()),
+            () -> WindowMovementControls.openKeyBinds(this)
+        );
+        this.addCycle(
             "window_opening_style",
             () -> Component.translatable("config.salts_inventory_update.window_opening_style." + SaltsInventoryConfig.get().windowOpeningStyle().name().toLowerCase(Locale.ROOT)),
             () -> SaltsInventoryConfig.update(config -> config.setWindowOpeningStyle(config.windowOpeningStyle().next()))
@@ -103,11 +113,7 @@ public final class SaltsInventoryConfigScreen extends Screen {
             () -> SaltsInventoryConfig.get().resetLockedWindows,
             value -> SaltsInventoryConfig.update(config -> config.resetLockedWindows = value)
         );
-        this.addToggle(
-            "enable_ghost_pins",
-            () -> SaltsInventoryConfig.get().enableGhostPins,
-            value -> SaltsInventoryConfig.update(config -> config.enableGhostPins = value)
-        );
+
         this.addToggle(
             "global_pins",
             () -> SaltsInventoryConfig.get().globalPins,
@@ -118,30 +124,13 @@ public final class SaltsInventoryConfigScreen extends Screen {
             () -> SaltsInventoryConfig.get().persistentWindows,
             value -> SaltsInventoryConfig.update(config -> config.persistentWindows = value)
         );
-        this.addToggle(
-            "minimizable_windows",
-            () -> SaltsInventoryConfig.get().minimizableWindows,
-            value -> {
-                SaltsInventoryConfig.update(config -> config.minimizableWindows = value);
-                if (!value) {
-                    InventoryDesktopScreen.unminimizeAllWindows();
-                }
-            }
-        );
+
         this.addToggle(
             "open_inventory_when_containers_are_opened",
             () -> SaltsInventoryConfig.get().openInventoryWhenContainersAreOpened,
             value -> SaltsInventoryConfig.update(config -> config.openInventoryWhenContainersAreOpened = value)
         );
-        this.addSlider(
-            "ghost_window_opacity",
-            0.15D,
-            0.90D,
-            0.01D,
-            SaltsInventoryConfig.get().ghostWindowOpacity,
-            value -> SaltsInventoryConfig.update(config -> config.ghostWindowOpacity = value),
-            value -> Component.translatable("config.salts_inventory_update.value.percent", Math.round(value * 100.0D))
-        );
+
         this.addSlider(
             "e_hold_close_all_seconds",
             0.5D,

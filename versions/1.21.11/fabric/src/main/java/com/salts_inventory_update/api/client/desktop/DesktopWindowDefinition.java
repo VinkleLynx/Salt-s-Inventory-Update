@@ -12,6 +12,11 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 
 public interface DesktopWindowDefinition<T, S> {
+    /** Native list viewports for D-pad edge scrolling and right-stick availability. Input still uses mouseScrolled. */
+    default java.util.List<DesktopScrollRegion> controllerScrollRegions(DesktopWindowContext<T, S> context) { return java.util.List.of(); }
+    /** Visible editable fields in native GUI coordinates. This distinguishes clicks from retained/automatic focus. */
+    default java.util.List<DesktopWindowBounds> textInputBounds(DesktopWindowContext<T,S> context) { return java.util.List.of(); }
+
     /** Immutable surface-relative rectangles. Each control kind may occur once; rectangles must not overlap. */
     default java.util.List<DesktopSurfaceControl> managementControls(DesktopWindowContext<T, S> context) { return java.util.List.of(); }
 
@@ -114,11 +119,9 @@ public interface DesktopWindowDefinition<T, S> {
     default void focusChanged(DesktopWindowContext<T, S> context, boolean focused) {
     }
 
-    default void ghosted(DesktopWindowContext<T, S> context) {
-    }
 
-    default void unghosted(DesktopWindowContext<T, S> context) {
-    }
+
+
 
     default void tick(DesktopWindowContext<T, S> context) {
     }

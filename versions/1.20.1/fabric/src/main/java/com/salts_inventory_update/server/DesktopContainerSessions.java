@@ -1,5 +1,7 @@
 package com.salts_inventory_update.server;
 
+import com.salts_inventory_update.internal.desktop.DesktopContainerOpener;
+
 import java.lang.ref.WeakReference;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -59,6 +61,7 @@ import net.minecraft.world.inventory.CraftingMenu;
 import net.minecraft.world.inventory.GrindstoneMenu;
 import net.minecraft.world.inventory.HorseInventoryMenu;
 import net.minecraft.world.inventory.InventoryMenu;
+import net.minecraft.world.inventory.LoomMenu;
 import net.minecraft.world.inventory.MerchantMenu;
 import net.minecraft.world.inventory.MenuType;
 import net.minecraft.world.inventory.RecipeBookMenu;
@@ -95,7 +98,6 @@ import com.salts_inventory_update.api.server.desktop.DesktopTransferDecision;
 import com.salts_inventory_update.api.server.desktop.DesktopTransferRequest;
 import com.salts_inventory_update.api.server.desktop.DesktopTransferRequirement;
 import com.salts_inventory_update.api.server.desktop.DesktopTransferValidators;
-import com.salts_inventory_update.compat.toms_storage.TomsStorageCompat;
 import com.salts_inventory_update.debug.DesktopDebug;
 import com.salts_inventory_update.inventory.InventoryExpansion;
 import com.salts_inventory_update.inventory.InventoryExpansionAccess;
@@ -103,6 +105,7 @@ import com.salts_inventory_update.network.DesktopPackets;
 import com.salts_inventory_update.network.DesktopMenuOpenDataPayload;
 import com.salts_inventory_update.api.desktop.DesktopMenuBindings;
 import com.salts_inventory_update.internal.desktop.DesktopSortSlots;
+import com.salts_inventory_update.internal.desktop.ContextualRecipes;
 import com.salts_inventory_update.internal.desktop.DesktopItemSourceLocks;
 import com.salts_inventory_update.internal.desktop.DesktopSessionSynchronizer;
 import com.salts_inventory_update.internal.desktop.DesktopSynchronizerOverride;
@@ -118,6 +121,7 @@ import com.salts_inventory_update.network.DesktopPackets.DesktopSortWindowsPaylo
 import com.salts_inventory_update.network.DesktopPackets.DesktopSlotReference;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSessionReference;
 import com.salts_inventory_update.network.DesktopPackets.DesktopCloseSessionPayload;
+import com.salts_inventory_update.network.DesktopPackets.DesktopFinishWorkspacePayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopCustomPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopDataPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopMerchantOffersPayload;
@@ -133,7 +137,6 @@ import com.salts_inventory_update.network.DesktopPackets.DesktopModePayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSessionAuthorizationPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopRenamePayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSessionClosedPayload;
-import com.salts_inventory_update.network.DesktopPackets.DesktopSessionPinPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSessionVisibilityPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSlotPayload;
 import com.salts_inventory_update.network.DesktopPackets.DesktopSourceLinkPayload;
@@ -145,13 +148,13 @@ import com.salts_inventory_update.protocol.BoundedLinkGraph;
 import com.salts_inventory_update.protocol.TokenBucket;
 
 public final class DesktopContainerSessions {
-    private static final long SUPPORTED_CAPABILITIES = DesktopProtocol.KNOWN_CAPABILITIES | DesktopPackets.CAP_MULTI_MENU_GESTURES | DesktopPackets.CAP_SORT_WINDOWS;
+    private static final long SUPPORTED_CAPABILITIES = DesktopProtocol.KNOWN_CAPABILITIES | DesktopPackets.CAP_MULTI_MENU_GESTURES | DesktopPackets.CAP_SORT_WINDOWS | DesktopPackets.CAP_CLICK_SEQUENCES;
     private static final int MAX_SESSIONS = DesktopProtocol.MAX_DESKTOP_SESSIONS;
     private static final int MAX_SOURCE_GRANTS = DesktopProtocol.MAX_LINK_NODES;
-    private static final int MAX_DORMANT_GHOST_SOURCES = DesktopProtocol.MAX_DORMANT_SOURCES;
+    private static final int MAX_RETAINED_SOURCES = DesktopProtocol.MAX_DORMANT_SOURCES;
     private static final int JEI_TRANSFER_MAX_CRAFTS = DesktopProtocol.MAX_TRANSFER_CRAFTS;
     private static final int JEI_TRANSFER_SEARCH_BUDGET = DesktopProtocol.MAX_TRANSFER_ATTEMPTS;
-    private static final int DORMANT_GHOST_REOPEN_INTERVAL_TICKS = DesktopProtocol.DORMANT_PROBE_INTERVAL_TICKS;
+
     private static final int CRAFTER_INPUT_SLOT_COUNT = 9;
     private static final int CRAFTER_SLOT_STATE_ENABLED_FLAG = 16;
     private static final int FURNACE_RESULT_SLOT = 2;
@@ -201,6 +204,7 @@ public final class DesktopContainerSessions {
         register(DesktopHelloPayload.TYPE, DesktopHelloPayload::new, DesktopContainerSessions::hello);
         register(DesktopModePayload.TYPE, DesktopModePayload::new, DesktopContainerSessions::mode);
         register(DesktopAuthenticatedPayload.TYPE, DesktopAuthenticatedPayload::new, DesktopContainerSessions::authenticated);
+        registerMutation(DesktopPackets.DesktopClickSequencePayload.TYPE, DesktopPackets.DesktopClickSequencePayload::new, DesktopPackets.CAP_CLICK_SEQUENCES, null, null, DesktopContainerSessions::clickSequence);
         registerMutation(DesktopClickPayload.TYPE, DesktopClickPayload::new, 0L, DesktopClickPayload::sessionId, null, DesktopContainerSessions::click);
         registerMutation(DesktopDragSlotsPayload.TYPE, DesktopDragSlotsPayload::new, DesktopPackets.CAP_MULTI_MENU_GESTURES, null, null, DesktopContainerSessions::dragSlots);
         registerMutation(DesktopPickupAllPayload.TYPE, DesktopPickupAllPayload::new, DesktopPackets.CAP_MULTI_MENU_GESTURES, null, null, DesktopContainerSessions::pickupAll);
@@ -208,11 +212,15 @@ public final class DesktopContainerSessions {
         registerMutation(DesktopQuickMoveAllPayload.TYPE, DesktopQuickMoveAllPayload::new, DesktopPackets.CAP_MULTI_MENU_GESTURES, null, null, DesktopContainerSessions::quickMoveAll);
         registerMutation(DesktopQuickMovePayload.TYPE, DesktopQuickMovePayload::new, 0L, DesktopQuickMovePayload::sourceSessionId, DesktopContainerSessions::quickMoveTargetSession, DesktopContainerSessions::quickMove);
         registerMutation(DesktopButtonPayload.TYPE, DesktopButtonPayload::new, 0L, DesktopButtonPayload::sessionId, null, DesktopContainerSessions::button);
+        registerMutation(DesktopPackets.DesktopCraftToWindowPayload.TYPE,DesktopPackets.DesktopCraftToWindowPayload::new,DesktopProtocol.CAP_RECIPE_TRANSFER,DesktopPackets.DesktopCraftToWindowPayload::sourceSessionId,DesktopPackets.DesktopCraftToWindowPayload::targetSessionId,DesktopContainerSessions::contextualCraft);
+        registerMutation(DesktopPackets.DesktopCookingRecipePayload.TYPE,DesktopPackets.DesktopCookingRecipePayload::new,DesktopProtocol.CAP_RECIPE_TRANSFER,DesktopPackets.DesktopCookingRecipePayload::sessionId,null,DesktopContainerSessions::contextualCook);
+        registerMutation(DesktopPackets.DesktopRecipeHoverPayload.TYPE,DesktopPackets.DesktopRecipeHoverPayload::new,DesktopProtocol.CAP_RECIPE_TRANSFER,DesktopPackets.DesktopRecipeHoverPayload::sessionId,null,DesktopContainerSessions::contextualHover);
         registerMutation(DesktopPlaceRecipePayload.TYPE, DesktopPlaceRecipePayload::new, DesktopProtocol.CAP_RECIPE_TRANSFER, DesktopPlaceRecipePayload::sessionId, null, DesktopContainerSessions::placeRecipe);
         registerMutation(DesktopJeiTransferPayload.TYPE, DesktopJeiTransferPayload::new, DesktopProtocol.CAP_RECIPE_TRANSFER, DesktopJeiTransferPayload::targetSessionId, null, DesktopContainerSessions::transferJeiRecipe);
         registerMutation(DesktopRenamePayload.TYPE, DesktopRenamePayload::new, 0L, DesktopRenamePayload::sessionId, null, DesktopContainerSessions::rename);
         registerMutation(DesktopCloseSessionPayload.TYPE, DesktopCloseSessionPayload::new, 0L, DesktopCloseSessionPayload::sessionId, null, DesktopContainerSessions::closeSessionFromClient);
-        registerMutation(DesktopSessionPinPayload.TYPE, DesktopSessionPinPayload::new, DesktopProtocol.CAP_LINK_GRAPH, DesktopSessionPinPayload::sessionId, null, DesktopContainerSessions::setSessionPin);
+        registerMutation(DesktopFinishWorkspacePayload.TYPE, DesktopFinishWorkspacePayload::new, 0L, DesktopFinishWorkspacePayload::sessionId, null, DesktopContainerSessions::finishWorkspace);
+
         registerMutation(DesktopSessionVisibilityPayload.TYPE, DesktopSessionVisibilityPayload::new, DesktopProtocol.CAP_LINK_GRAPH, DesktopSessionVisibilityPayload::sessionId, null, DesktopContainerSessions::setSessionVisibility);
         registerMutation(DesktopSourceLinkPayload.TYPE, DesktopSourceLinkPayload::new, DesktopProtocol.CAP_LINK_GRAPH, DesktopSourceLinkPayload::firstSessionId, DesktopSourceLinkPayload::secondSessionId, DesktopContainerSessions::setSourceLink);
         registerMutation(DesktopOpenLinkedSourcesPayload.TYPE, DesktopOpenLinkedSourcesPayload::new, DesktopProtocol.CAP_LINK_GRAPH | DesktopProtocol.CAP_CUSTOM_WINDOWS, null, null, DesktopContainerSessions::openLinkedSources);
@@ -430,7 +438,7 @@ public final class DesktopContainerSessions {
 
     private static int quickMoveTargetSession(DesktopQuickMovePayload payload) {
         if (payload.targetKind() < DesktopPackets.QUICK_TARGET_DEFAULT
-            || payload.targetKind() > DesktopPackets.QUICK_TARGET_HOTBAR) {
+            || payload.targetKind() > DesktopPackets.QUICK_TARGET_PLAYER_STORAGE) {
             throw new IllegalArgumentException("Invalid quick move target kind: " + payload.targetKind());
         }
         return payload.targetKind() == DesktopPackets.QUICK_TARGET_SESSION
@@ -494,6 +502,7 @@ public final class DesktopContainerSessions {
         }
 
         for (Session session : sessions.sessions.values()) {
+            if (!session.visibleToClient) continue;
             Container sessionContainer = containerForMenu(session.menu);
             if (sessionContainer != null && containsContainer(sessionContainer, container)) {
                 DesktopDebug.trace(
@@ -526,7 +535,7 @@ public final class DesktopContainerSessions {
     }
 
     public static @Nullable OptionalInt openMenuSession(ServerPlayer player, MenuProvider provider) {
-        return openMenuSession(player, provider, null, true, false, true);
+        return openMenuSession(player, provider, null, true, true);
     }
 
     public static @Nullable OptionalInt openMenuSession(ServerPlayer player, MenuProvider provider, Consumer<FriendlyByteBuf> openingDataWriter) {
@@ -596,14 +605,7 @@ public final class DesktopContainerSessions {
         }
     }
 
-    private static @Nullable OptionalInt openMenuSession(
-        ServerPlayer player,
-        MenuProvider provider,
-        @Nullable String forcedSourceKey,
-        boolean toggleExisting,
-        boolean ghostPinned,
-        boolean visibleToClient
-    ) {
+    private static @Nullable OptionalInt openMenuSession(ServerPlayer player, MenuProvider provider, @Nullable String forcedSourceKey, boolean toggleExisting, boolean visibleToClient) {
         if (provider == null) {
             DesktopDebug.warn("server capture skipped player={} reason=null-provider", player.getName().getString());
             return OptionalInt.empty();
@@ -618,7 +620,7 @@ public final class DesktopContainerSessions {
         if (transition != null && transition.player() == player) {
             forcedSourceKey = transition.oldSession().sourceKey;
             toggleExisting = false;
-            ghostPinned = transition.oldSession().ghostPinned;
+
             visibleToClient = transition.oldSession().visibleToClient;
         } else {
             transition = null;
@@ -708,8 +710,11 @@ public final class DesktopContainerSessions {
             openingData,
             transition == null ? -1 : transition.oldSession().sessionId
         );
-        session.ghostPinned = ghostPinned;
+
         session.visibleToClient = visibleToClient;
+        if (!visibleToClient && menu instanceof DesktopContainerOpener opener) {
+            opener.salts_inventory_update$setOpenerVisible(player, false);
+        }
         if (isBlockBackedSourceKey(session.sourceKey)) {
             if (forcedSourceKey == null) {
                 session.sourceGrantToken = sessions.authorizeSource(player, session.sourceKey);
@@ -730,14 +735,14 @@ public final class DesktopContainerSessions {
             return OptionalInt.empty();
         }
         DesktopDebug.log(
-            "server capture menu player={} session={} container={} type={} title={} source={} ghostPinned={} visible={}",
+            "server capture menu player={} session={} container={} type={} title={} source={} visible={}",
             player.getName().getString(),
             session.sessionId,
             menu.containerId,
             session.menuTypeId,
             provider.getDisplayName().getString(),
             session.sourceKey,
-            session.ghostPinned,
+            false,
             session.visibleToClient
         );
         return OptionalInt.of(session.sessionId);
@@ -1048,6 +1053,45 @@ public final class DesktopContainerSessions {
                 || sessions.sessionWorld != null && sessions.sessionWorld != player.level())) {
                 sessions.tick(player);
             }
+        }
+    }
+
+    private static void clickSequence(ServerPlayer player, DesktopPackets.DesktopClickSequencePayload payload) {
+        PlayerSessions sessions = existingSessions(player);
+        if (sessions == null || !sessions.isReady()) return;
+        boolean accepted = false;
+        try {
+            if (payload.sequence() != sessions.lastClickSequence + 1) return;
+            sessions.lastClickSequence = payload.sequence();
+            // Validate every source before executing any action. Later clicks legitimately change revisions.
+            for (var action : payload.actions()) {
+                var ref = action.slot();
+                if (!sessions.connectionState.authorizes(sessions.connectionState.connectionNonce(), capabilityForSession(ref.sessionId()), true)) return;
+                AbstractContainerMenu menu = authorizedMenu(player, sessions, ref.sessionId(), ref.sessionToken(), ref.stateId());
+                if (action.target() != null) {
+                    var target=action.target();
+                    if (!sessions.connectionState.authorizes(sessions.connectionState.connectionNonce(),capabilityForSession(target.sessionId()),true)
+                        || authorizedMenu(player,sessions,target.sessionId(),target.sessionToken(),target.stateId())==null) return;
+                }
+                Slot slot = menu == null ? null : DesktopMenuBindings.slot(menu, ref.slotIndex());
+                Session owner = sessions.sessions.get(ref.sessionId());
+                if (slot == null || !slot.isActive() || DesktopMenuBindings.isVirtualSlot(menu,slot)
+                    || DesktopItemSourceLocks.isSlotLocked(player,slot)
+                    || ref.sessionId() != DesktopPackets.PLAYER_MENU_SESSION && (owner == null || !owner.visibleToClient)) return;
+            }
+            for (var action : payload.actions()) {
+                var ref = action.slot();
+                AbstractContainerMenu menu = ref.sessionId() == DesktopPackets.PLAYER_MENU_SESSION ? player.inventoryMenu : sessions.sessions.get(ref.sessionId()).menu;
+                ClickType input = action.quickMove() ? ClickType.QUICK_MOVE : ClickType.PICKUP;
+                if (DesktopItemSourceLocks.shouldRejectClick(player,menu,ref.slotIndex(),action.button(),input,player.inventoryMenu.getCarried())) return;
+                if (action.targetKind()>=0) quickMove(player,new DesktopQuickMovePayload(ref.sessionId(),ref.slotIndex(),action.targetKind(),action.target().sessionId()));
+                else clickMenu(0,player,sessions,menu,ref.slotIndex(),action.button(),input,player.inventoryMenu.getCarried().copy());
+            }
+            accepted = true;
+        } finally {
+            if (!accepted) for (int sessionId : payload.actions().stream().map(action -> action.slot().sessionId()).distinct().toList()) sessions.resyncSession(player,sessionId);
+            sessions.broadcastAll(player);
+            send(player,new DesktopPackets.DesktopClickSequenceAckPayload(sessions.connectionState.connectionNonce(),payload.sequence(),accepted));
         }
     }
 
@@ -1366,10 +1410,14 @@ public final class DesktopContainerSessions {
             return;
         }
 
+        if (payload.targetKind() < DesktopPackets.QUICK_TARGET_DEFAULT
+            || payload.targetKind() > DesktopPackets.QUICK_TARGET_PLAYER_STORAGE) return;
         SlotSource source = resolveSlot(player, sessions, payload.sourceSessionId(), payload.sourceSlotIndex());
         if (source == null) {
             return;
         }
+        if (payload.targetKind() != DesktopPackets.QUICK_TARGET_DEFAULT
+            && !allowsQuickMoveRouting(source.menu, source.slot, payload.targetKind())) return;
 
         if (payload.targetKind() == DesktopPackets.QUICK_TARGET_SESSION) {
             if (payload.targetSessionId() == source.sessionId) {
@@ -1415,8 +1463,7 @@ public final class DesktopContainerSessions {
             );
         }
 
-        if (payload.targetKind() != DesktopPackets.QUICK_TARGET_SESSION
-            && isVanillaResultSource(source, payload.sourceSlotIndex())) {
+        if (usesNativeResultQuickMove(payload.targetKind(), source, payload.sourceSlotIndex())) {
             DesktopDebug.trace(
                 "server quick move vanilla result player={} sourceSession={} sourceSlot={} menu={}",
                 player.getName().getString(),
@@ -1441,7 +1488,7 @@ public final class DesktopContainerSessions {
 
         if (payload.targetKind() == DesktopPackets.QUICK_TARGET_SESSION && payload.targetSessionId() != source.sessionId) {
             Session targetSession = sessions.sessions.get(payload.targetSessionId());
-            if (quickMoveIntoTomStorageTerminal(player, sessions, source, targetSession)) {
+            if (quickMoveIntoNativeInventory(player, sessions, source, targetSession)) {
                 return;
             }
         }
@@ -1452,7 +1499,10 @@ public final class DesktopContainerSessions {
             return;
         }
 
-        boolean moved = moveSlotStack(player, source.slot, targets);
+        AbstractContainerMenu targetMenu = payload.targetKind() == DesktopPackets.QUICK_TARGET_SESSION
+            ? sessions.sessions.get(payload.targetSessionId()).menu : player.inventoryMenu;
+        boolean moved = moveSlotStack(player, sessions, source, targetMenu, targets,
+            new QuickMoveWorkBudget(MAX_QUICK_MOVE_TRANSACTION_WORK), false);
         DesktopDebug.trace(
             "server quick move player={} sourceSession={} sourceSlot={} targetKind={} targetSession={} moved={}",
             player.getName().getString(),
@@ -1503,7 +1553,6 @@ public final class DesktopContainerSessions {
         }
         sessions.replacingPlayer = false;
         sessions.nextSessionId = 1;
-        sessions.dormantGhostProbeTicks = 0;
         PLAYERS.put(newPlayer.connection, sessions);
         if (sessions.connectionState.isNegotiated()) {
             sessions.playerMenuToken = nextNonce();
@@ -1517,13 +1566,18 @@ public final class DesktopContainerSessions {
         }
     }
 
-    private static boolean quickMoveIntoTomStorageTerminal(ServerPlayer player, PlayerSessions sessions, SlotSource source, @Nullable Session targetSession) {
+    private static boolean usesNativeInventoryQuickMove(AbstractContainerMenu menu) {
+        var handler = DesktopServerApi.findWindowHandler(menu.getType());
+        return handler != null && handler.usesNativePlayerInventoryQuickMove(menu);
+    }
+
+    private static boolean quickMoveIntoNativeInventory(ServerPlayer player, PlayerSessions sessions, SlotSource source, @Nullable Session targetSession) {
         @Nullable MenuType<?> targetMenuType = targetSession == null ? null : targetSession.menuType();
         if (targetSession == null
             || !targetSession.visibleToClient
             || !targetSession.menu.stillValid(player)
             || targetMenuType == null
-            || !TomsStorageCompat.isTerminal(targetMenuType)
+            || !usesNativeInventoryQuickMove(targetSession.menu)
             || !isPlayerInventorySlot(player, source.slot)
             || !source.slot.hasItem()) {
             return false;
@@ -1540,7 +1594,7 @@ public final class DesktopContainerSessions {
         }
         if (targetSlotIndex < 0) {
             DesktopDebug.trace(
-                "server quick move tom terminal dropped player={} sourceSlot={} targetSession={} reason=no-matching-player-slot",
+                "server quick move native inventory dropped player={} sourceSlot={} targetSession={} reason=no-matching-player-slot",
                 player.getName().getString(),
                 sourceContainerSlot,
                 targetSession.sessionId
@@ -1564,7 +1618,7 @@ public final class DesktopContainerSessions {
         ItemStack after = targetSession.menu.slots.get(targetSlotIndex).getItem();
         boolean moved = !ItemStack.matches(before, after);
         DesktopDebug.trace(
-            "server quick move tom terminal player={} sourceSession={} sourceSlot={} targetSession={} targetSlot={} moved={} before={} after={}",
+            "server quick move native inventory player={} sourceSession={} sourceSlot={} targetSession={} targetSlot={} moved={} before={} after={}",
             player.getName().getString(),
             source.sessionId,
             source.slot.getContainerSlot(),
@@ -1583,31 +1637,25 @@ public final class DesktopContainerSessions {
     }
 
     private static boolean isVanillaResultSource(SlotSource source, int slotIndex) {
-        if (source.menu instanceof RecipeBookMenu<?> recipeMenu && source.menu.slots.indexOf(source.slot) == recipeMenu.getResultSlotIndex()) {
-            return true;
-        }
-        if (source.menu instanceof AbstractFurnaceMenu) {
-            return slotIndex == FURNACE_RESULT_SLOT;
-        }
-        if (source.menu instanceof AnvilMenu) {
-            return slotIndex == ANVIL_RESULT_SLOT;
-        }
-        if (source.menu instanceof CartographyTableMenu) {
-            return slotIndex == CARTOGRAPHY_RESULT_SLOT;
-        }
-        if (source.menu instanceof GrindstoneMenu) {
-            return slotIndex == GRINDSTONE_RESULT_SLOT;
-        }
-        if (source.menu instanceof MerchantMenu) {
-            return slotIndex == MERCHANT_RESULT_SLOT;
-        }
-        if (source.menu instanceof SmithingMenu) {
-            return slotIndex == SMITHING_RESULT_SLOT;
-        }
-        if (source.menu instanceof StonecutterMenu) {
-            return slotIndex == STONECUTTER_RESULT_SLOT;
-        }
+        return isVanillaResultSlot(source.menu, slotIndex);
+    }
+
+    private static boolean isVanillaResultSlot(AbstractContainerMenu menu, int slotIndex) {
+        if (menu instanceof RecipeBookMenu<?> recipeMenu) return slotIndex == recipeMenu.getResultSlotIndex();
+        if (menu instanceof AbstractFurnaceMenu) return slotIndex == FURNACE_RESULT_SLOT;
+        if (menu instanceof AnvilMenu) return slotIndex == ANVIL_RESULT_SLOT;
+        if (menu instanceof CartographyTableMenu) return slotIndex == CARTOGRAPHY_RESULT_SLOT;
+        if (menu instanceof GrindstoneMenu) return slotIndex == GRINDSTONE_RESULT_SLOT;
+        if (menu instanceof LoomMenu) return slotIndex == 3;
+        if (menu instanceof MerchantMenu) return slotIndex == MERCHANT_RESULT_SLOT;
+        if (menu instanceof SmithingMenu) return slotIndex == SMITHING_RESULT_SLOT;
+        if (menu instanceof StonecutterMenu) return slotIndex == STONECUTTER_RESULT_SLOT;
         return false;
+    }
+
+    private static boolean usesNativeResultQuickMove(int targetKind, SlotSource source, int slotIndex) {
+        return (targetKind == DesktopPackets.QUICK_TARGET_DEFAULT || targetKind == DesktopPackets.QUICK_TARGET_PLAYER_STORAGE)
+            && isVanillaResultSource(source, slotIndex);
     }
 
     private static void button(ServerPlayer player, DesktopButtonPayload payload) {
@@ -1660,6 +1708,232 @@ public final class DesktopContainerSessions {
         } else {
             syncCarried(player, sessions);
         }
+    }
+
+    private static AbstractContainerMenu contextualMenu(ServerPlayer player,PlayerSessions sessions,int id) {
+        if(id==DesktopPackets.PLAYER_MENU_SESSION)return player.inventoryMenu;
+        Session session=sessions.sessions.get(id);
+        return session!=null&&session.visibleToClient&&validCompanion(player,sessions,session)&&session.menu.stillValid(player)?session.menu:null;
+    }
+    private static List<Slot> contextualSources(ServerPlayer player,PlayerSessions sessions,AbstractContainerMenu excludedMenu,List<Slot> excluded) {
+        return new ArrayList<>(contextualSourcePool(player,sessions,excludedMenu,excluded).values());
+    }
+    private static Map<com.salts_inventory_update.internal.desktop.ContextualRecipeSources.PhysicalKey,Slot> contextualSourcePool(ServerPlayer player,PlayerSessions sessions,AbstractContainerMenu excludedMenu,List<Slot> excluded) {
+        var candidates=new ArrayList<com.salts_inventory_update.internal.desktop.ContextualRecipeSources.OwnedSlot>();
+        for(Slot slot:DesktopMenuBindings.all(player.inventoryMenu))if(com.salts_inventory_update.internal.desktop.ContextualRecipeSources.eligible(player,slot,true))
+            candidates.add(new com.salts_inventory_update.internal.desktop.ContextualRecipeSources.OwnedSlot(player.inventoryMenu,slot));
+        for(Session session:List.copyOf(sessions.sessions.values()))if(contextualMenu(player,sessions,session.sessionId)==session.menu)
+            for(Slot slot:DesktopMenuBindings.all(session.menu))if(com.salts_inventory_update.internal.desktop.ContextualRecipeSources.eligible(player,slot,true))
+                candidates.add(new com.salts_inventory_update.internal.desktop.ContextualRecipeSources.OwnedSlot(session.menu,slot));
+        var blocked=excluded.stream().map(slot->new com.salts_inventory_update.internal.desktop.ContextualRecipeSources.OwnedSlot(excludedMenu,slot)).toList();
+        return com.salts_inventory_update.internal.desktop.ContextualRecipeSources.physicalPool(candidates,blocked);
+    }
+    private static boolean contextualApply(ServerPlayer player,PlayerSessions sessions,AbstractContainerMenu menu,Map<Slot,ItemStack> changes) {
+        Map<Slot,ItemStack> before=new LinkedHashMap<>();for(Slot slot:changes.keySet())before.put(slot,slot.getItem().copy());
+        try {
+            withMenuNetworkSession(player,sessions,menu,()->{for(var entry:changes.entrySet())setJeiTransferSlotStack(entry.getKey(),entry.getValue());});
+            return true;
+        }catch(RuntimeException failure){
+            for(var entry:before.entrySet())setJeiTransferSlotStack(entry.getKey(),entry.getValue());
+            DesktopDebug.warn("Contextual recipe placement rolled back: {}",failure.toString());return false;
+        }
+    }
+    private static boolean clearContextualInputs(ServerPlayer player,PlayerSessions sessions,AbstractContainerMenu menu,boolean output) {
+        List<Slot> owned=new ArrayList<>(ContextualRecipes.inputs(menu));
+        if(output&&menu instanceof AbstractFurnaceMenu)owned.add(menu.getSlot(2));
+        List<Slot> excluded=new ArrayList<>(owned);
+        if(menu instanceof AbstractFurnaceMenu){excluded.add(menu.getSlot(1));excluded.add(menu.getSlot(2));}
+        List<Slot> storage=contextualSources(player,sessions,menu,excluded);
+        Map<Slot,ItemStack> changes=new LinkedHashMap<>();for(Slot slot:storage)changes.put(slot,slot.getItem().copy());
+        for(Slot slot:owned){
+            if(slot.hasItem()&&(!slot.isActive()||!slot.mayPickup(player)||DesktopItemSourceLocks.isSlotLocked(player,slot)))return false;
+            if(!insertJeiTransferStack(storage,changes,slot.getItem().copy()))return false;
+        }
+        // Furnace result removal must run its native extraction callback (recipe awards and XP).
+        if(output&&menu instanceof AbstractFurnaceMenu&&menu.getSlot(2).hasItem()) {
+            Slot result=menu.getSlot(2);ItemStack removed=result.remove(result.getItem().getCount());
+            withMenuNetworkSession(player,sessions,menu,()->result.onTake(player,removed));
+        }
+        for(Slot slot:owned)changes.put(slot,ItemStack.EMPTY);
+        return contextualApply(player,sessions,menu,changes);
+    }
+    private static void contextualHover(ServerPlayer player,DesktopPackets.DesktopRecipeHoverPayload payload) {
+        PlayerSessions sessions=existingSessions(player);if(sessions==null)return;
+        RecipeHover hover=sessions.recipeHover;
+        if(payload.action()==DesktopPackets.RECIPE_HOVER_END){if(hover!=null&&hover.sessionId==payload.sessionId()&&hover.epoch==payload.epoch())endRecipeHover(player,sessions);return;}
+        AbstractContainerMenu menu=contextualMenu(player,sessions,payload.sessionId());
+        if(player.isSpectator()||!player.inventoryMenu.getCarried().isEmpty()||menu==null||!(ContextualRecipes.isCrafting(menu)||menu instanceof AbstractFurnaceMenu))return;
+        if(hover==null||hover.sessionId!=payload.sessionId()||hover.epoch!=payload.epoch()){
+            if(payload.action()!=DesktopPackets.RECIPE_HOVER_BEGIN)return;
+            endRecipeHover(player,sessions);hover=new RecipeHover(payload.sessionId(),payload.epoch(),menu,player.level().getGameTime());
+            if(!clearContextualInputs(player,sessions,menu,true)){send(player,new DesktopPackets.DesktopRecipeHoverStatePayload(sessions.connectionState.connectionNonce(),hover.sessionId,hover.epoch,false,null,List.of()));return;}
+            sessions.recipeHover=hover;
+        }
+        hover.touchedTick=player.level().getGameTime();
+        if(payload.action()==DesktopPackets.RECIPE_HOVER_UPDATE&&!java.util.Objects.equals(hover.recipe,payload.recipeId())){
+            restoreContextualHover(player,sessions,hover);hover.recipe=payload.recipeId();stageContextualHover(player,sessions,hover);
+        }
+        sendContextualHover(player,sessions,hover,true);sessions.broadcastAll(player);
+    }
+    private static void stageContextualHover(ServerPlayer player,PlayerSessions sessions,RecipeHover hover) {
+        hover.ghosts=List.of();if(hover.recipe==null)return;
+        Recipe<?> recipe=player.level().getRecipeManager().byKey(hover.recipe).orElse(null);
+        if(recipe==null||!player.getRecipeBook().contains(recipe)||recipe.isIncomplete())return;
+        if(ContextualRecipes.isCrafting(hover.menu)?!(recipe instanceof CraftingRecipe):!(recipe instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe)||!ContextualRecipes.cookingType(hover.menu,recipe))return;
+        List<Ingredient> shape=ContextualRecipes.grid(hover.menu,recipe);List<Slot> inputs=ContextualRecipes.inputs(hover.menu);
+        if(shape.size()!=inputs.size()||inputs.stream().anyMatch(Slot::hasItem)&&!clearContextualInputs(player,sessions,hover.menu,false))return;
+        List<Slot> excluded=new ArrayList<>(inputs);
+        if(hover.menu instanceof AbstractFurnaceMenu){excluded.add(hover.menu.getSlot(1));excluded.add(hover.menu.getSlot(2));}
+        List<Slot> sources=contextualSources(player,sessions,hover.menu,excluded);List<Integer> indices=new ArrayList<>();
+        for(int i=0;i<shape.size();i++)if(!shape.get(i).isEmpty())indices.add(i);
+        boolean[][] accepts=new boolean[indices.size()][sources.size()];int[] counts=sources.stream().mapToInt(slot->slot.getItem().getCount()).toArray();
+        for(int r=0;r<indices.size();r++)for(int s=0;s<sources.size();s++) {
+            Slot target=inputs.get(indices.get(r));ItemStack stack=sources.get(s).getItem();
+            accepts[r][s]=target.isActive()&&target.mayPickup(player)&&!DesktopItemSourceLocks.isSlotLocked(player,target)&&shape.get(indices.get(r)).test(stack)&&target.mayPlace(stack);
+        }
+        int[] allocation=com.salts_inventory_update.internal.desktop.PartialRecipeAllocation.allocate(accepts,counts);
+        Map<Slot,ItemStack> changes=new LinkedHashMap<>();List<HoverPlacement> placements=new ArrayList<>();List<DesktopPackets.RecipeHoverGhost> ghosts=new ArrayList<>();
+        for(int r=0;r<indices.size();r++){
+            Slot target=inputs.get(indices.get(r));
+            if(allocation[r]<0){ItemStack[] options=shape.get(indices.get(r)).getItems();if(options.length>0)ghosts.add(new DesktopPackets.RecipeHoverGhost(target.index,options[0]));continue;}
+            Slot origin=sources.get(allocation[r]);ItemStack item=origin.getItem().copyWithCount(1);
+            changes.computeIfAbsent(origin,ignored->origin.getItem().copy()).shrink(1);changes.put(target,item);
+            placements.add(new HoverPlacement(target,origin,item,cookingCounter(target),null));
+        }
+        if(contextualApply(player,sessions,hover.menu,changes)){
+            for(HoverPlacement placement:placements)hover.placements.add(new HoverPlacement(placement.target,placement.origin,placement.item,placement.counter,placement.target.getItem()));
+            hover.ghosts=List.copyOf(ghosts);
+        }
+    }
+    private static long cookingCounter(Slot slot){return slot.container instanceof com.salts_inventory_update.internal.desktop.FurnaceCookingCounter counter?counter.salts_inventory_update$completedCookingOperations():-1;}
+    private static void restoreContextualHover(ServerPlayer player,PlayerSessions sessions,RecipeHover hover) {
+        for(HoverPlacement placement:List.copyOf(hover.placements)){
+            ItemStack present=placement.target.getItem();
+            if(present!=placement.identity||present.isEmpty()||!ItemStack.isSameItemSameTags(present,placement.item)||placement.counter>=0&&placement.counter!=cookingCounter(placement.target))continue;
+            ItemStack returning=placement.target.remove(Math.min(placement.item.getCount(),present.getCount()));placement.target.setChanged();
+            List<Slot> excluded=new ArrayList<>(ContextualRecipes.inputs(hover.menu));if(hover.menu instanceof AbstractFurnaceMenu){excluded.add(hover.menu.getSlot(1));excluded.add(hover.menu.getSlot(2));}
+            List<Slot> sources=contextualSources(player,sessions,hover.menu,excluded);
+            if(sources.stream().anyMatch(slot->slot==placement.origin))insertContextualReturn(placement.origin,returning);
+            for(Slot target:sources){if(returning.isEmpty())break;insertContextualReturn(target,returning);}
+            if(!returning.isEmpty())player.drop(returning.copy(),false);
+        }
+        hover.placements.clear();hover.ghosts=List.of();
+    }
+    private static void insertContextualReturn(Slot target,ItemStack moving) {
+        if(moving.isEmpty()||!target.isActive()||!target.mayPlace(moving))return;
+        ItemStack current=target.getItem();if(!current.isEmpty()&&!ItemStack.isSameItemSameTags(current,moving))return;
+        int amount=Math.min(moving.getCount(),Math.max(0,Math.min(moving.getMaxStackSize(),target.getMaxStackSize(moving))-current.getCount()));
+        if(amount>0){setJeiTransferSlotStack(target,moving.copyWithCount(current.getCount()+amount));moving.shrink(amount);}
+    }
+    private static void sendContextualHover(ServerPlayer player,PlayerSessions sessions,RecipeHover hover,boolean active){send(player,new DesktopPackets.DesktopRecipeHoverStatePayload(sessions.connectionState.connectionNonce(),hover.sessionId,hover.epoch,active,active?hover.recipe:null,active?hover.ghosts:List.of()));}
+    private static void endRecipeHover(ServerPlayer player,PlayerSessions sessions){
+        RecipeHover hover=sessions.recipeHover;if(hover==null)return;sessions.recipeHover=null;
+        withMenuNetworkSession(player,sessions,hover.menu,()->restoreContextualHover(player,sessions,hover));sendContextualHover(player,sessions,hover,false);sessions.broadcastAll(player);
+    }
+    private record HoverPlacement(Slot target,Slot origin,ItemStack item,long counter,ItemStack identity) { }
+    private static final class RecipeHover {
+        final int sessionId;final long epoch;final AbstractContainerMenu menu;long touchedTick;ResourceLocation recipe;
+        List<DesktopPackets.RecipeHoverGhost> ghosts=List.of();final List<HoverPlacement> placements=new ArrayList<>();
+        RecipeHover(int sessionId,long epoch,AbstractContainerMenu menu,long tick){this.sessionId=sessionId;this.epoch=epoch;this.menu=menu;this.touchedTick=tick;}
+    }
+    private static void contextualCraft(ServerPlayer player,DesktopPackets.DesktopCraftToWindowPayload payload) {
+        PlayerSessions sessions=existingSessions(player);if(sessions==null||player.isSpectator()||!player.inventoryMenu.getCarried().isEmpty())return;
+        AbstractContainerMenu sourceMenu=contextualMenu(player,sessions,payload.sourceSessionId()),targetMenu=contextualMenu(player,sessions,payload.targetSessionId());
+        if(!ContextualRecipes.isCrafting(sourceMenu)||targetMenu==null||sourceMenu==targetMenu&&sourceMenu!=player.inventoryMenu)return;
+        Recipe<?> value=player.level().getRecipeManager().byKey(payload.recipeId()).orElse(null);
+        if(!(value instanceof CraftingRecipe recipe)||!player.getRecipeBook().contains(recipe)||recipe.isIncomplete())return;
+        RecipeHover hover=sessions.recipeHover;if(hover!=null)restoreContextualHover(player,sessions,hover);
+        List<Slot> grid=ContextualRecipes.inputs(sourceMenu);List<Ingredient> shape=ContextualRecipes.grid(sourceMenu,recipe);
+        if(shape.size()!=grid.size())return;
+        SlotSource output=resolveSlot(player,sessions,payload.sourceSessionId(),0);if(output==null||!allowsQuickMoveRouting(sourceMenu,output.slot,payload.targetSessionId()==0?DesktopPackets.QUICK_TARGET_PLAYER_STORAGE:DesktopPackets.QUICK_TARGET_SESSION))return;
+        List<Slot> targets=new ArrayList<>(payload.targetSessionId()==0?hotbarSlots(player):containerSlots(targetMenu,player));
+        if(payload.targetSessionId()==0)targets.addAll(mainInventorySlots(player));
+        targets=uniqueQuickMoveTargets(output,targetMenu,targets);QuickMoveWorkBudget budget=new QuickMoveWorkBudget(MAX_QUICK_MOVE_TRANSACTION_WORK);
+        int produced=0,limit=0;ItemStack first=ItemStack.EMPTY;
+        do {
+            if(contextualMenu(player,sessions,payload.sourceSessionId())!=sourceMenu||contextualMenu(player,sessions,payload.targetSessionId())!=targetMenu)break;
+            var ingredientPool=contextualSourcePool(player,sessions,sourceMenu,grid);
+            List<Slot> sources=new ArrayList<>(ingredientPool.values());List<JeiTransferRequirement> requirements=new ArrayList<>();
+            for(int i=0;i<shape.size();i++)if(!shape.get(i).isEmpty()){
+                Ingredient ingredient=shape.get(i);Slot slot=grid.get(i);List<ItemStack> variants=new ArrayList<>();
+                for(Slot available:sources)if(!available.getItem().isEmpty()&&ingredient.test(available.getItem())&&slot.mayPlace(available.getItem())&&variants.stream().noneMatch(other->ItemStack.isSameItemSameTags(other,available.getItem())))variants.add(available.getItem().copyWithCount(1));
+                for(Slot available:grid)if(!available.getItem().isEmpty()&&ingredient.test(available.getItem())&&slot.mayPlace(available.getItem())&&variants.stream().noneMatch(other->ItemStack.isSameItemSameTags(other,available.getItem())))variants.add(available.getItem().copyWithCount(1));
+                requirements.add(new JeiTransferRequirement(i,slot.index,slot,1,variants));
+            }
+            JeiTransferSimulation simulation=simulateJeiTransfer(player,grid,requirements,sources,false,1);if(simulation==null)break;
+            net.minecraft.world.inventory.TransientCraftingContainer simulated=new net.minecraft.world.inventory.TransientCraftingContainer(new AbstractContainerMenu(null,-1){@Override public boolean stillValid(Player ignored){return true;}@Override public ItemStack quickMoveStack(Player ignored,int slot){return ItemStack.EMPTY;}},ContextualRecipes.width(sourceMenu),ContextualRecipes.height(sourceMenu));
+            for(int i=0;i<grid.size();i++)simulated.setItem(i,simulation.targetStacks().getOrDefault(grid.get(i),ItemStack.EMPTY));
+            if(!recipe.matches(simulated,player.level()))break;
+            ItemStack preview=recipe.assemble(simulated,player.level().registryAccess());if(preview.isEmpty())break;
+            if(first.isEmpty()){first=preview.copyWithCount(1);limit=payload.stack()?preview.getMaxStackSize():preview.getCount();}
+            if(!ItemStack.isSameItemSameTags(first,preview)||preview.getCount()>limit-produced)break;
+            Map<com.salts_inventory_update.internal.desktop.ContextualRecipeSources.PhysicalKey,ItemStack> plannedSources=new LinkedHashMap<>();
+            for(var entry:ingredientPool.entrySet())plannedSources.put(entry.getKey(),simulation.sourceStacks().get(entry.getValue()));
+            List<Slot> batchTargets=contextualCraftTargets(player,targetMenu,preview,targets,plannedSources);
+            if(batchTargets.isEmpty())break;
+            Map<Slot,ItemStack> before=new LinkedHashMap<>();for(Slot slot:simulation.sourceStacks().keySet())before.put(slot,slot.getItem().copy());for(Slot slot:grid)before.put(slot,slot.getItem().copy());
+            try{
+                withMenuNetworkSession(player,sessions,sourceMenu,()->applyJeiTransferSimulation(simulation));
+                ItemStack actual=output.slot.getItem();
+                if(!ItemStack.isSameItemSameTags(actual,preview)||actual.getCount()!=preview.getCount()||!contextualCraftOutputFits(player,targetMenu,preview,batchTargets)||!moveSlotStack(player,sessions,output,targetMenu,batchTargets,budget,false)){
+                    contextualApply(player,sessions,sourceMenu,before);break;
+                }
+                produced+=preview.getCount();
+            }catch(RuntimeException failure){contextualApply(player,sessions,sourceMenu,before);throw failure;}
+        }while(payload.stack()&&produced<limit);
+        if(hover!=null&&sessions.recipeHover==hover){stageContextualHover(player,sessions,hover);sendContextualHover(player,sessions,hover,true);}
+        sessions.broadcastAll(player);
+    }
+    private static List<Slot> contextualCraftTargets(ServerPlayer player,AbstractContainerMenu targetMenu,ItemStack output,List<Slot> candidates,
+            Map<com.salts_inventory_update.internal.desktop.ContextualRecipeSources.PhysicalKey,ItemStack> plannedSources){
+        List<Slot> result=new ArrayList<>();long capacity=0;
+        boolean hotbarFirst=targetMenu==player.inventoryMenu;
+        for(int pass=0;pass<(hotbarFirst?4:2);pass++)for(Slot slot:candidates){
+            boolean hotbar=slot.container==player.getInventory()&&slot.getContainerSlot()>=0&&slot.getContainerSlot()<9;
+            if(hotbarFirst&&hotbar!=(pass<2)||DesktopItemSourceLocks.isSlotLocked(player,slot))continue;
+            ItemStack present=plannedSources.getOrDefault(com.salts_inventory_update.internal.desktop.ContextualRecipeSources.key(targetMenu,slot),slot.getItem());
+            if(present.isEmpty()!=(pass%2==1))continue;
+            int available=com.salts_inventory_update.internal.desktop.ContextualRecipeSources.outputCapacity(targetMenu,slot,output,plannedSources);
+            if(available<=0)continue;
+            result.add(slot);capacity+=available;
+            if(capacity>=output.getCount())return result;
+        }
+        return List.of();
+    }
+    private static boolean contextualCraftOutputFits(ServerPlayer player,AbstractContainerMenu menu,ItemStack output,List<Slot> targets){
+        long capacity=0;
+        for(Slot slot:targets)if(!DesktopItemSourceLocks.isSlotLocked(player,slot))
+            capacity+=com.salts_inventory_update.internal.desktop.ContextualRecipeSources.outputCapacity(menu,slot,output,Map.of());
+        return capacity>=output.getCount();
+    }
+    private static void contextualCook(ServerPlayer player,DesktopPackets.DesktopCookingRecipePayload payload) {
+        PlayerSessions sessions=existingSessions(player);if(sessions==null||player.isSpectator()||!player.inventoryMenu.getCarried().isEmpty())return;
+        AbstractContainerMenu menu=contextualMenu(player,sessions,payload.sessionId());if(!(menu instanceof AbstractFurnaceMenu furnace))return;
+        Recipe<?> value=player.level().getRecipeManager().byKey(payload.recipeId()).orElse(null);
+        if(!(value instanceof net.minecraft.world.item.crafting.AbstractCookingRecipe recipe)||!player.getRecipeBook().contains(recipe)||!ContextualRecipes.cookingType(menu,recipe))return;
+        RecipeHover hover=sessions.recipeHover;
+        if(hover!=null&&hover.menu==menu&&java.util.Objects.equals(hover.recipe,payload.recipeId())&&hover.ghosts.isEmpty()&&furnace.getSlot(0).hasItem()){
+            // Confirmation commits staged inputs; subsequent hover cleanup must not borrow them back.
+            hover.placements.clear();
+        } else if(hover!=null)restoreContextualHover(player,sessions,hover);
+        Slot input=furnace.getSlot(0),fuel=furnace.getSlot(1),output=furnace.getSlot(2);ItemStack result=recipe.getResultItem(player.level().registryAccess());
+        if(!input.getItem().isEmpty()&&!recipe.getIngredients().get(0).test(input.getItem())||!output.getItem().isEmpty()&&!ItemStack.isSameItemSameTags(output.getItem(),result)||output.getItem().getCount()+result.getCount()>result.getMaxStackSize())return;
+        List<Slot> sources=contextualSources(player,sessions,menu,List.of(input,fuel,output));Map<Slot,ItemStack> changes=new LinkedHashMap<>();
+        for(Slot source:sources)changes.put(source,source.getItem().copy());
+        if(input.getItem().isEmpty())for(Slot source:sources){ItemStack available=changes.get(source);if(recipe.getIngredients().get(0).test(available)&&input.mayPlace(available)){changes.put(input,available.copyWithCount(1));available.shrink(1);break;}}
+        if(!changes.containsKey(input)&&!input.hasItem())return;
+        if(!furnace.isLit()&&!fuel.hasItem()){
+            for(Slot source:sources){ItemStack available=changes.get(source);if(ContextualRecipes.fuel(available)&&fuel.mayPlace(available)){changes.put(fuel,available.copyWithCount(1));available.shrink(1);break;}}
+            if(!changes.containsKey(fuel))return;
+        }
+        contextualApply(player,sessions,menu,changes);sessions.broadcastAll(player);
+    }
+    private static void returnCharacterGrid(ServerPlayer player,PlayerSessions sessions){
+        for(Slot input:ContextualRecipes.inputs(player.inventoryMenu))if(input.hasItem()){
+            ItemStack moving=input.remove(input.getItem().getCount());input.setChanged();
+            if(!player.getInventory().add(moving)&&!moving.isEmpty())player.drop(moving,false);
+        }
+        player.inventoryMenu.broadcastChanges();
     }
 
     private static void placeRecipe(ServerPlayer player, DesktopPlaceRecipePayload payload) {
@@ -2560,12 +2834,34 @@ public final class DesktopContainerSessions {
     }
 
     private static List<net.minecraft.world.inventory.Slot> quickMoveTargets(ServerPlayer player, PlayerSessions sessions, SlotSource source, DesktopQuickMovePayload payload) {
+        if (payload.targetKind() == DesktopPackets.QUICK_TARGET_PLAYER_EQUIPMENT) {
+            // These are precisely the crafting inputs, armor and offhand shown by Character.
+            // Result slot zero is an output and must never become an insertion destination.
+            List<Slot> equipment = new ArrayList<>(9);
+            for (int slotIndex = 1; slotIndex <= 8 && slotIndex < player.inventoryMenu.slots.size(); slotIndex++) {
+                equipment.add(player.inventoryMenu.slots.get(slotIndex));
+            }
+            if (player.inventoryMenu.slots.size() > 45) equipment.add(player.inventoryMenu.slots.get(45));
+            return equipment;
+        }
+        if (payload.targetKind() == DesktopPackets.QUICK_TARGET_PLAYER_STORAGE) {
+            if(source.sessionId==DesktopPackets.PLAYER_MENU_SESSION && isPlayerInventorySlot(player,source.slot))return defaultPlayerTargets(player,source.slot);
+            boolean crafted=ContextualRecipes.isCrafting(source.menu)&&source.slot.index==0;
+            List<Slot> storage=new ArrayList<>(crafted?hotbarSlots(player):mainInventorySlots(player));
+            storage.addAll(crafted?mainInventorySlots(player):hotbarSlots(player));
+            return storage;
+        }
         if (payload.targetKind() == DesktopPackets.QUICK_TARGET_SESSION) {
             if (payload.targetSessionId() == source.sessionId) {
                 return List.of();
             }
             Session targetSession = sessions.sessions.get(payload.targetSessionId());
             if (targetSession != null && targetSession.visibleToClient && targetSession.menu.stillValid(player)) {
+                if (targetSession.menu instanceof net.minecraft.world.inventory.AbstractFurnaceMenu
+                        && targetSession.menu.slots.size() > 1) {
+                    Slot fuel = targetSession.menu.slots.get(1);
+                    if (fuel.mayPlace(source.slot.getItem())) return List.of(fuel);
+                }
                 return containerSlots(targetSession.menu, player);
             }
             return List.of();
@@ -2595,11 +2891,18 @@ public final class DesktopContainerSessions {
         return slots;
     }
 
+    private static boolean allowsQuickMoveRouting(AbstractContainerMenu menu, Slot slot, int targetKind) {
+        return DesktopMenuBindings.allowsTargetedQuickMoveSource(menu, slot)
+            || targetKind == DesktopPackets.QUICK_TARGET_DEFAULT && DesktopMenuBindings.useNativeQuickMove(menu);
+    }
+
     private static boolean moveSlotStack(
         ServerPlayer player, PlayerSessions sessions, SlotSource source, AbstractContainerMenu targetMenu,
         List<Slot> targets, QuickMoveWorkBudget workBudget, boolean sortExtraction
     ) {
         Slot sourceSlot = source.slot;
+        boolean nativeResult = isVanillaResultSource(source, sourceSlot.index);
+        boolean replenishingResult = nativeResult && !(source.menu instanceof AbstractFurnaceMenu);
         if (!sourceSlot.isActive() || !sourceSlot.hasItem() || !sourceSlot.mayPickup(player)) {
             return false;
         }
@@ -2636,14 +2939,21 @@ public final class DesktopContainerSessions {
             ItemStack remainder = moving.copy();
             final int extractedCount = moved;
             withMenuNetworkSession(player, sessions, source.menu, () -> {
-                if (sortExtraction) {
+                if (sortExtraction || nativeResult) {
                     sourceSlot.onQuickCraft(remainder, sourceBefore);
-                    sourceSlot.onTake(player, sourceBefore.copyWithCount(extractedCount));
-                } else {
-                    sourceSlot.onTake(player, remainder);
                 }
+                sourceSlot.onTake(player, sourceBefore.copyWithCount(extractedCount));
             });
-            verifyQuickMoveTransaction(player, carriedBefore, source, moving, plans);
+            // Vanilla recipe result callbacks consume inputs and may publish the next recipe's
+            // result. That newly computed output belongs to the source rather than this transfer.
+            // Keep checking the source's original physical identity, the cursor and every target.
+            ItemStack afterTake = replenishingResult ? sourceSlot.getItem().copy() : moving;
+            verifyQuickMoveTransaction(player, carriedBefore, source, afterTake, plans);
+            if (replenishingResult && !remainder.isEmpty()) {
+                // CraftingMenu's native quick-move also drops an uninserted partial output after
+                // consuming one recipe. Never discard it when a precise destination partly fills.
+                player.drop(remainder.copy(), false);
+            }
             return true;
         } catch (RuntimeException exception) {
             try {
@@ -3399,6 +3709,15 @@ public final class DesktopContainerSessions {
         DesktopDebug.trace("server sync player-menu player={} slots={}", player.getName().getString(), player.inventoryMenu.slots.size());
     }
 
+    private static void requireCursorContext(ServerPlayer player, PlayerSessions sessions, Session session) {
+        var level = player.level();
+        var server = level == null ? null : level.getServer();
+        if (server == null || !server.isSameThread() || existingSessions(player) != sessions
+            || sessions.sessions.get(session.sessionId) != session || !session.menu.stillValid(player)) {
+            throw new IllegalStateException("Shared cursor access requires a live server-thread session");
+        }
+    }
+
     private static void setSharedCarried(ServerPlayer player, PlayerSessions sessions, ItemStack stack) {
         ItemStack carried = stack.copy();
         player.inventoryMenu.setCarried(carried.copy());
@@ -3479,35 +3798,30 @@ public final class DesktopContainerSessions {
         }
     }
 
+    /** Authenticated cleanup keeps cursor ownership on the server and uses vanilla overflow drops. */
+    private static void finishWorkspace(ServerPlayer player, DesktopFinishWorkspacePayload payload) {
+        PlayerSessions sessions = existingSessions(player);
+        if (payload.sessionId() != DesktopPackets.PLAYER_MENU_SESSION || sessions == null
+                || !sessions.isReady() || !sessions.controlRate.tryConsume(System.nanoTime())) return;
+        endRecipeHover(player, sessions);
+        player.inventoryMenu.removed(player);
+        setSharedCarried(player, sessions, ItemStack.EMPTY);
+        sessions.broadcastAll(player);
+    }
+
     private static void closeSessionFromClient(ServerPlayer player, DesktopCloseSessionPayload payload) {
-        PlayerSessions companionSessions = PLAYERS.get(player);
+        PlayerSessions companionSessions = existingSessions(player);
         Session companionSession = companionSessions == null ? null : companionSessions.sessions.get(payload.sessionId());
         if (companionSession != null && companionSession.companion != null) return;
         PlayerSessions sessions = existingSessions(player);
         if (sessions == null || !sessions.controlRate.tryConsume(System.nanoTime())) {
             return;
         }
+        if(payload.sessionId()==DesktopPackets.PLAYER_MENU_SESSION){returnCharacterGrid(player,sessions);sessions.broadcastAll(player);return;}
         closeSession(player, payload.sessionId(), true);
     }
 
-    private static void setSessionPin(ServerPlayer player, DesktopSessionPinPayload payload) {
-        PlayerSessions sessions = existingSessions(player);
-        if (sessions == null || !sessions.isReady() || !sessions.controlRate.tryConsume(System.nanoTime())) {
-            DesktopDebug.trace("server pin dropped player={} session={} reason=not-ready", player.getName().getString(), payload.sessionId());
-            return;
-        }
 
-        Session session = sessions.sessions.get(payload.sessionId());
-        if (session == null) {
-            DesktopDebug.trace("server pin dropped player={} session={} reason=missing-session", player.getName().getString(), payload.sessionId());
-            return;
-        }
-
-        if (session.companion != null) return;
-        session.ghostPinned = payload.pinMode() == DesktopPackets.PIN_MODE_GHOST_PINNED;
-        DesktopDebug.trace("server pin player={} session={} ghostPinned={}", player.getName().getString(), payload.sessionId(), session.ghostPinned);
-        session.dispatchPinChanged(player, sessions);
-    }
 
     private static void setSessionVisibility(ServerPlayer player, DesktopSessionVisibilityPayload payload) {
         PlayerSessions sessions = existingSessions(player);
@@ -3528,7 +3842,7 @@ public final class DesktopContainerSessions {
 
         if (!validCompanion(player, sessions, session) || !session.menu.stillValid(player)) {
             DesktopDebug.log("server visibility invalid player={} session={} title={}", player.getName().getString(), session.sessionId, session.title.getString());
-            sessions.rememberDormantGhost(player, session, "visibility-invalid");
+
             sessions.close(player, session.sessionId, true);
             return;
         }
@@ -3610,7 +3924,7 @@ public final class DesktopContainerSessions {
             Session existing = sessions.sessionForSourceKey(sourceKey);
             if (existing != null) {
                 if (!existing.menu.stillValid(player)) {
-                    sessions.rememberDormantGhost(player, existing, "linked-open-invalid");
+
                     sessions.close(player, existing.sessionId, true);
                     continue;
                 }
@@ -3620,14 +3934,14 @@ public final class DesktopContainerSessions {
                 continue;
             }
 
-            MenuProvider provider = providerForDormantGhost(player, sourceKey);
+            MenuProvider provider = providerForRetainedSource(player, sourceKey);
             if (provider == null) {
                 DesktopDebug.trace("server linked open skipped player={} source={} reason=unavailable", player.getName().getString(), sourceKey);
                 continue;
             }
 
             DesktopDebug.log("server linked open player={} source={} title={}", player.getName().getString(), sourceKey, provider.getDisplayName().getString());
-            openMenuSession(player, provider, sourceKey, false, false, true);
+            openMenuSession(player, provider, sourceKey, false, true);
         }
     }
 
@@ -3669,10 +3983,11 @@ public final class DesktopContainerSessions {
     }
 
     private static final class PlayerSessions {
+        private RecipeHover recipeHover;
         private final LinkedHashMap<Integer, Session> sessions = new LinkedHashMap<>();
         private net.minecraft.world.level.@Nullable Level sessionWorld;
         private final Map<com.salts_inventory_update.api.desktop.DesktopInventoryIdentity, Companion> companions = new LinkedHashMap<>();
-        private final LinkedHashMap<String, DormantGhostSource> dormantGhostSources = new LinkedHashMap<>();
+
         private final LinkedHashMap<Long, SourceGrant> sourceGrants = new LinkedHashMap<>();
         private final Map<String, Long> sourceGrantTokensByKey = new HashMap<>();
         private final BoundedLinkGraph<Long> sourceLinks = new BoundedLinkGraph<>();
@@ -3680,12 +3995,13 @@ public final class DesktopContainerSessions {
         private Set<ResourceLocation> forcedMenuIds = Set.of();
         private Set<ResourceLocation> supportedMenuIds = Set.of();
         private int nextSessionId = 1;
-        private int dormantGhostProbeTicks;
+
         private long playerMenuToken;
         private boolean replacingPlayer;
         private int serverHandlerCallbackDepth;
         private boolean serverHandlerBroadcastPending;
         private final TokenBucket operationRate = new TokenBucket(40.0D, 80.0D, System.nanoTime());
+        private long lastClickSequence;
         private final TokenBucket resyncRate = new TokenBucket(1.0D, 1.0D, System.nanoTime());
         private final TokenBucket controlRate = new TokenBucket(8.0D, DesktopProtocol.MAX_DESKTOP_SESSIONS, System.nanoTime());
         private final TokenBucket snapshotRate = new TokenBucket(1.0D, 2.0D, System.nanoTime());
@@ -3745,6 +4061,7 @@ public final class DesktopContainerSessions {
         }
 
         private void resetForHello(ServerPlayer player) {
+            this.lastClickSequence = 0;
             this.closeAll(player, true);
             this.connectionState.reset();
             this.playerMenuToken = 0L;
@@ -3752,7 +4069,6 @@ public final class DesktopContainerSessions {
             this.supportedMenuIds = Set.of();
             this.replacingPlayer = false;
             this.nextSessionId = 1;
-            this.dormantGhostProbeTicks = 0;
         }
 
         private void setForcedMenuIds(List<String> requestedIds) {
@@ -3831,9 +4147,7 @@ public final class DesktopContainerSessions {
             boolean handled = false;
             for (Session session : List.copyOf(this.sessions.values())) {
                 if (sourceKey.equals(session.sourceKey)) {
-                    if (session.ghostPinned) {
-                        this.setVisible(player, session, !session.visibleToClient, notifyClient);
-                    } else {
+                    {
                         this.close(player, session.sessionId, notifyClient);
                     }
                     handled = true;
@@ -3849,6 +4163,9 @@ public final class DesktopContainerSessions {
             }
 
             session.visibleToClient = visible;
+            if (session.menu instanceof DesktopContainerOpener opener) {
+                opener.salts_inventory_update$setOpenerVisible(player, visible);
+            }
             DesktopDebug.log("server session visibility player={} session={} title={} visible={} notify={}", player.getName().getString(), session.sessionId, session.title.getString(), visible, notifyClient);
             if (notifyClient) {
                 send(player, new DesktopSessionVisibilityPayload(session.sessionId, visible));
@@ -3861,6 +4178,7 @@ public final class DesktopContainerSessions {
         }
 
         private void close(ServerPlayer player, int sessionId, boolean notifyClient) {
+            if(recipeHover!=null)endRecipeHover(player,this);
             Session session = this.sessions.remove(sessionId);
             if (session == null) {
                 DesktopDebug.trace("server close ignored player={} session={} reason=missing", player.getName().getString(), sessionId);
@@ -3888,16 +4206,19 @@ public final class DesktopContainerSessions {
         }
 
         private void closeAll(ServerPlayer player, boolean notifyClient) {
+            endRecipeHover(player,this);
+            returnCharacterGrid(player,this);
             for (Integer sessionId : List.copyOf(this.sessions.keySet())) {
                 this.close(player, sessionId, notifyClient);
             }
-            this.dormantGhostSources.clear();
+
             this.sourceGrants.clear();
             this.sourceGrantTokensByKey.clear();
             this.sourceLinks.clear();
         }
 
         private void tick(ServerPlayer player) {
+            if(recipeHover!=null&&(player.level().getGameTime()-recipeHover.touchedTick>60||!isReady()||player.isSpectator()||!recipeHover.menu.stillValid(player)))endRecipeHover(player,this);
             if (this.sessionWorld != null && this.sessionWorld != player.level()) {
                 this.closeAll(player, true);
                 this.sessionWorld = player.level();
@@ -3907,14 +4228,14 @@ public final class DesktopContainerSessions {
                 if (this.sessions.get(session.sessionId) != session) continue;
                 if (!validCompanion(player, this, session) || !session.menu.stillValid(player)) {
                     DesktopDebug.log("server session invalid player={} session={} title={}", player.getName().getString(), session.sessionId, session.title.getString());
-                    this.rememberDormantGhost(player, session, "invalid");
+
                     this.close(player, session.sessionId, true);
                 } else {
                     session.menu.broadcastChanges();
                     session.dispatchTick(player, this);
                 }
             }
-            this.reopenDormantGhosts(player);
+
         }
 
         private void broadcastAll(ServerPlayer player) {
@@ -3951,53 +4272,9 @@ public final class DesktopContainerSessions {
             this.broadcastAll(player);
         }
 
-        private void rememberDormantGhost(ServerPlayer player, Session session, String reason) {
-            if (!session.ghostPinned || !isBlockBackedSourceKey(session.sourceKey) || !this.isSourceAuthorized(player, session.sourceKey)) {
-                return;
-            }
 
-            this.dormantGhostSources.put(
-                session.sourceKey,
-                new DormantGhostSource(session.sourceKey, player.serverLevel().getGameTime() + DesktopProtocol.DORMANT_SOURCE_TTL_TICKS)
-            );
-            trimOldest(this.dormantGhostSources, MAX_DORMANT_GHOST_SOURCES);
-            DesktopDebug.log("server dormant ghost remember source={} session={} title={} reason={}", session.sourceKey, session.sessionId, session.title.getString(), reason);
-        }
 
-        private void reopenDormantGhosts(ServerPlayer player) {
-            if (this.dormantGhostSources.isEmpty()) {
-                return;
-            }
 
-            this.dormantGhostProbeTicks++;
-            if (this.dormantGhostProbeTicks % DORMANT_GHOST_REOPEN_INTERVAL_TICKS != 0) {
-                return;
-            }
-
-            for (DormantGhostSource dormant : List.copyOf(this.dormantGhostSources.values())) {
-                if (player.serverLevel().getGameTime() > dormant.expiresAtTick()) {
-                    this.dormantGhostSources.remove(dormant.sourceKey());
-                    continue;
-                }
-                if (this.hasSessionForSourceKey(dormant.sourceKey())) {
-                    this.dormantGhostSources.remove(dormant.sourceKey());
-                    continue;
-                }
-                if (!this.isSourceAuthorized(player, dormant.sourceKey())) {
-                    this.dormantGhostSources.remove(dormant.sourceKey());
-                    continue;
-                }
-
-                MenuProvider provider = providerForDormantGhost(player, dormant.sourceKey());
-                if (provider == null) {
-                    continue;
-                }
-
-                this.dormantGhostSources.remove(dormant.sourceKey());
-                DesktopDebug.log("server dormant ghost reopen player={} source={} title={}", player.getName().getString(), dormant.sourceKey(), provider.getDisplayName().getString());
-                openMenuSession(player, provider, dormant.sourceKey(), false, true, false);
-            }
-        }
 
         private boolean allowLinkedOpen(ServerPlayer player) {
             return this.linkedOpenRate.tryConsume(System.nanoTime());
@@ -4102,7 +4379,7 @@ public final class DesktopContainerSessions {
         private boolean initialSnapshotSent;
         private @Nullable Companion companion;
         private long sourceGrantToken;
-        private boolean ghostPinned;
+
         private boolean visibleToClient = true;
         private @Nullable DesktopServerWindowHandler<AbstractContainerMenu, Object> serverHandler;
         private @Nullable Object serverState;
@@ -4246,23 +4523,7 @@ public final class DesktopContainerSessions {
             }
         }
 
-        private void dispatchPinChanged(ServerPlayer player, PlayerSessions sessions) {
-            if (this.serverHandler == null) {
-                return;
-            }
-            DesktopServerWindowHandler<AbstractContainerMenu, Object> handler = this.serverHandler;
-            try {
-                sessions.invokeServerHandlerCallback(
-                    player,
-                    () -> withCanonicalCarried(player, sessions, this.menu, () -> {
-                        handler.pinChanged(new ServerSessionContext(player, sessions, this), this.ghostPinned);
-                        return null;
-                    })
-                );
-            } catch (RuntimeException exception) {
-                this.quarantineServerHandler(player, "pin", exception);
-            }
-        }
+
 
         private void quarantineServerHandler(ServerPlayer player, String callback, RuntimeException exception) {
             DesktopDebug.warn(
@@ -4353,8 +4614,7 @@ public final class DesktopContainerSessions {
         }
     }
 
-    private record DormantGhostSource(String sourceKey, long expiresAtTick) {
-    }
+
 
     private static final class MutationRegistration<P extends DesktopPacket> {
         private final Function<FriendlyByteBuf, P> decoder;
@@ -4408,7 +4668,12 @@ public final class DesktopContainerSessions {
                 }
                 boolean primaryCurrent = !hasPrimary || sessions.sessionStateMatches(player, primary, envelope.primaryStateId());
                 boolean secondaryCurrent = !hasSecondary || sessions.sessionStateMatches(player, secondary, envelope.secondaryStateId());
-                if (!primaryCurrent || !secondaryCurrent) {
+                boolean hoverCleanup=payload instanceof DesktopPackets.DesktopRecipeHoverPayload hover && hover.action()==DesktopPackets.RECIPE_HOVER_END
+                    && sessions.recipeHover!=null&&sessions.recipeHover.sessionId==hover.sessionId()&&sessions.recipeHover.epoch==hover.epoch();
+                // Closing a real authenticated owner is cleanup. Its input-return callbacks
+                // must remain possible after an in-flight preview advanced the menu state.
+                boolean closingOwner=payload instanceof DesktopCloseSessionPayload || payload instanceof DesktopFinishWorkspacePayload;
+                if ((!primaryCurrent || !secondaryCurrent) && !hoverCleanup && !closingOwner) {
                     DesktopDebug.trace("server mutation rejected player={} type={} reason=stale-state", player.getName().getString(), envelope.innerType());
                     if (sessions.resyncRate.tryConsume(System.nanoTime())) {
                         if (!primaryCurrent && hasPrimary) {
@@ -4420,6 +4685,7 @@ public final class DesktopContainerSessions {
                     }
                     return;
                 }
+                if(!(payload instanceof DesktopPackets.DesktopRecipeHoverPayload)&&!(payload instanceof DesktopPackets.DesktopCraftToWindowPayload)&&!(payload instanceof DesktopPackets.DesktopCookingRecipePayload))endRecipeHover(player,sessions);
                 this.handler.accept(player, payload);
             } catch (RuntimeException | StackOverflowError exception) {
                 DesktopDebug.warn("server mutation rejected player={} type={} reason={}", player.getName().getString(), envelope.innerType(), exception.toString());
@@ -4520,10 +4786,7 @@ public final class DesktopContainerSessions {
             return this.session.visibleToClient;
         }
 
-        @Override
-        public boolean ghostPinned() {
-            return this.session.ghostPinned;
-        }
+
 
         @Override
         public Object state() {
@@ -4533,6 +4796,18 @@ public final class DesktopContainerSessions {
         @Override
         public void sendToClient(ResourceLocation channel, byte[] data) {
             send(this.player, new DesktopCustomPayload(this.session.sessionId, channel, data));
+        }
+
+        @Override
+        public net.minecraft.world.item.ItemStack carriedStack() {
+            requireCursorContext(this.player, this.sessions, this.session);
+            return this.player.inventoryMenu.getCarried().copy();
+        }
+
+        @Override
+        public void setCarriedStack(net.minecraft.world.item.ItemStack stack) {
+            requireCursorContext(this.player, this.sessions, this.session);
+            setSharedCarried(this.player, this.sessions, java.util.Objects.requireNonNull(stack, "stack"));
         }
 
         @Override
@@ -4571,10 +4846,7 @@ public final class DesktopContainerSessions {
             return this.session.visibleToClient;
         }
 
-        @Override
-        public boolean ghostPinned() {
-            return this.session.ghostPinned;
-        }
+
 
         @Override
         public Object state() {
@@ -4597,6 +4869,18 @@ public final class DesktopContainerSessions {
         }
 
         @Override
+        public net.minecraft.world.item.ItemStack carriedStack() {
+            requireCursorContext(this.player, this.sessions, this.session);
+            return this.player.inventoryMenu.getCarried().copy();
+        }
+
+        @Override
+        public void setCarriedStack(net.minecraft.world.item.ItemStack stack) {
+            requireCursorContext(this.player, this.sessions, this.session);
+            setSharedCarried(this.player, this.sessions, java.util.Objects.requireNonNull(stack, "stack"));
+        }
+
+        @Override
         public void broadcastChanges() {
             this.sessions.requestBroadcastChanges(this.player);
         }
@@ -4616,13 +4900,16 @@ public final class DesktopContainerSessions {
             DesktopDebug.log("server send initial player={} session={} title={} slots={} data={}", this.player.getName().getString(), this.session.sessionId, this.session.title.getString(), stacks.size(), dataSlots.length);
             ItemStack canonicalCarried = this.canonicalCarried(menu);
             PlayerSessions sessions = existingSessions(this.player);
-            if (!this.session.initialSnapshotSent && sessions != null && (this.session.openingData.length > 0 || this.session.companion != null)) {
+            // Every full snapshot reconstructs the client menu. Its factory needs
+            // the original opening data again; replacement applies only once.
+            int replacesSessionId = this.session.initialSnapshotSent ? -1 : this.session.replacesSessionId;
+            if (sessions != null && (this.session.openingData.length > 0 || this.session.companion != null)) {
                 send(this.player, new DesktopMenuOpenDataPayload(
                     sessions.connectionState.connectionNonce(),
                     this.session.sessionId,
                     this.session.sessionToken,
                     this.session.menuTypeId,
-                    this.session.replacesSessionId,
+                    replacesSessionId,
                     this.session.openingData,
                     this.session.companion == null ? new int[0]
                         : this.session.companion.owners.keySet().stream().mapToInt(Integer::intValue).toArray(), false
@@ -4692,7 +4979,7 @@ public final class DesktopContainerSessions {
         return sourceKey.startsWith("block:") || sourceKey.startsWith("chest:");
     }
 
-    private static @Nullable MenuProvider providerForDormantGhost(ServerPlayer player, String sourceKey) {
+    private static @Nullable MenuProvider providerForRetainedSource(ServerPlayer player, String sourceKey) {
         SourceKey source = SourceKey.parse(sourceKey);
         if (source == null || !source.dimension().equals(player.level().dimension().location().toString())) {
             return null;

@@ -18,6 +18,11 @@ import net.minecraft.world.item.ItemStack;
 public final class DesktopMenuBindings {
     private static final Map<MenuType<?>, Access> ACCESS = new LinkedHashMap<>();
 
+    /** Declares slots eligible for storage sorting on both client and server. */
+    public static void registerStorage(MenuType<?> type, java.util.function.BiPredicate<AbstractContainerMenu, Slot> slots) {
+        com.salts_inventory_update.internal.desktop.DesktopSortSlots.registerStorage(type, slots);
+    }
+
     private DesktopMenuBindings() {
     }
 
@@ -107,6 +112,12 @@ public final class DesktopMenuBindings {
             }
         }
         return List.copyOf(slots);
+    }
+
+    /** Registered phantom entries remain interactive UI, without ingredient or item ownership. */
+    public static boolean isVirtualSlot(AbstractContainerMenu menu, Slot slot) {
+        Access access=access(menu);
+        return access!=null && access.slots.isVirtualSlot(menu,slot);
     }
 
     /** Explicit inventory ownership for custom slot wrappers and nonstandard inventory layouts. */
@@ -262,6 +273,8 @@ public final class DesktopMenuBindings {
     @FunctionalInterface
     public interface SlotAccess {
         int size(AbstractContainerMenu menu);
+
+        default boolean isVirtualSlot(AbstractContainerMenu menu, Slot slot) { return false; }
 
         default boolean isPlayerInventorySlot(AbstractContainerMenu menu, Slot slot,
                                               net.minecraft.world.entity.player.Inventory inventory) {

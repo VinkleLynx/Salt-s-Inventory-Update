@@ -6,14 +6,14 @@
 
 ```properties
 modId=developer_examples
-apiVersion=5
+apiVersion=6
 common=example.desktop.ExampleCommonIntegration
 client=example.desktop.ExampleClientIntegration
 ```
 
 Save this as `META-INF/salts_inventory_update.integration.properties`. Do not install the providers as ordinary mod entrypoints. Keep Salt compile-only and optional in loader metadata. When your preferences action runs, call `ExampleUiHooks.openPreferences.test(instanceKey, model)`; if it returns false, open your usual preferences screen.
 
-Run `./gradlew verifyApiExamples` (with `CI=true` for NeoForge) to compile every example on all twelve targets. The canonical source uses 26.3 native names; `prepareApiExamples` produces each target's input/graphics/identifier adaptation in `build/generated/api-examples`. `compileApiExamples` compiles against that loader's production output and real Minecraft classpath. These are reusable integration sources, not a complete distributable test mod, and they do not enter Salt's release jars.
+Run `./gradlew verifyApiExamples` to compile every example on all twelve targets. The canonical source uses 26.3 native names; `prepareApiExamples` produces each target's input/graphics/identifier adaptation in `build/generated/api-examples`. Legacy input wrappers live in `com.salts_inventory_update.api.client.input`. `compileApiExamples` compiles against that loader's production output and real Minecraft classpath. These are reusable integration sources, not a complete distributable test mod, and they do not enter Salt's release jars. The optional compatibility extension also compiles on every target, using a classpath containing only Salt's public API.
 
 The terminal uses a reproducible 10,000-entry catalog and a server-validated selection action. It demonstrates virtual rendering and session-targeted synchronization without manufacturing inventory items. Replace its catalog/selection backend with your actual storage permissions and transaction logic for withdrawals.
 
@@ -24,3 +24,7 @@ The machine uses `OriginalSlotArtwork` for computed gesture previews and exposes
 `ui/src/main/java/example/companion` demonstrates two independent main sessions acquiring one real nine-slot Network Tool companion, separate sources, source replacement authorization, drag-only lifetime policy and opt-in controls in original title artwork. The ordinary backend and menu types contain no Salt references. Bind `CompanionMenus` alongside your normal registry registration, then use the optional companion providers named in `companion-demo` metadata. See the [public companion contract](../docs/markdown/companion_windows.md).
 
 Build the standalone NeoForge 26.3 consumer with `./gradlew :26.3:neoforge:companionDemoJar`. It packages the example backend, optional providers, original textures and normal fallback screens, without Salt classes or a required Salt dependency. See [the runnable demonstration README](companion-demo/README.md). The all-target `verifyApiExamples` task also compiles its shared companion integration sources on all twelve supported targets.
+
+## HUD positioning
+
+[RearrangedHud](hud/src/main/java/example/hud/RearrangedHud.java) demonstrates a public-API-only provider with independently placed offhand and a scaled vertical hotbar. Match it to your own HUD renderer. See the [HUD API guide](../docs/markdown/hud_interoperability.md).

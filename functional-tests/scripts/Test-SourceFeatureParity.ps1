@@ -123,6 +123,51 @@ function Assert-NotMatches {
     }
 }
 
+function Assert-JavaMethodMatches {
+    param(
+        [string] $Path,
+        [string] $SignaturePattern,
+        [string] $Pattern,
+        [string] $Label
+    )
+
+    if (-not (Assert-File -Path $Path -Label $Label)) {
+        return
+    }
+
+    # Bound checks to the complete method, ignoring braces and guard text in comments/literals.
+    # A source refactor may grow a method without weakening the condition we need to protect.
+    $content = Get-Content -LiteralPath $Path -Raw
+    $ignoredTokens = '(?s)//[^\r\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*'''
+    $code = [regex]::Replace($content, $ignoredTokens, ' ')
+    $signature = [regex]::Match($code, $SignaturePattern + '\s*\{')
+    if (-not $signature.Success) {
+        Add-Failure "$Label missing method '$SignaturePattern' in $Path"
+        return
+    }
+
+    $bodyStart = $signature.Index + $signature.Length
+    $depth = 1
+    foreach ($brace in [regex]::Matches($code.Substring($bodyStart), '[{}]')) {
+        if ($brace.Value -eq '{') {
+            $depth++
+        } else {
+            $depth--
+        }
+        if ($depth -eq 0) {
+            $body = $code.Substring($bodyStart, $brace.Index)
+            if (-not [regex]::IsMatch($body, $Pattern)) {
+                Add-Failure "$Label missing method-body pattern '$Pattern' in $Path"
+            } else {
+                Write-Host "PASS $Label" -ForegroundColor Green
+            }
+            return
+        }
+    }
+
+    Add-Failure "$Label has an unclosed method body in $Path"
+}
+
 function Get-Sha256 {
     param([string] $Path)
 
@@ -200,7 +245,6 @@ $payloads = @(
     'DesktopRenamePayload',
     'DesktopCustomPayload',
     'DesktopCloseSessionPayload',
-    'DesktopSessionPinPayload',
     'DesktopSessionVisibilityPayload',
     'DesktopOpenLinkedSourcesPayload',
     'DesktopOpenSessionPayload',
@@ -233,7 +277,7 @@ foreach ($version in $versions) {
     } else {
         $serverPlayerMixin
     }
-    $tomsPayloads = Join-Path $fabricRoot 'compat\toms_storage\TomsStoragePayloads.java'
+$tomsPayloads = Join-Path $RepoRoot "compatibility\versions\$version\fabric\src\main\java\com\salts_inventory_update\compat\toms_storage\TomsStoragePayloads.java"
     $language = Join-Path $RepoRoot "versions\$version\common\src\main\resources\assets\salts_inventory_update\lang\en_us.json"
     $mixinConfig = Join-Path $RepoRoot "versions\$version\common\src\main\resources\salts_inventory_update.mixins.json"
 
@@ -258,7 +302,7 @@ foreach ($version in $versions) {
     Assert-NotContains -Path $packets -Text 'List<Integer> recipeSlotIds' -Label "$version recipe transfer does not trust client slot IDs"
     Assert-NotContains -Path $packets -Text 'DesktopJeiTransferRequirement' -Label "$version recipe transfer does not trust client ingredients"
 
-    Assert-Contains -Path $packets -Text 'PIN_MODE_GHOST_PINNED' -Label "$version packet pin modes"
+    Assert-NotContains -Path $packets -Text 'PIN_MODE_GHOST_PINNED' -Label "$version removes ghost pin packets"
     Assert-Contains -Path $packets -Text 'QUICK_TARGET_HOTBAR' -Label "$version quick move target"
     $characterKey = if ($version -eq '26.3') { 'InputConstants.KEY_C' } else { 'GLFW_KEY_C' }
     $mouseFocusDefault = if ($version -eq '26.3') { 'InputConstants.KEY_LALT' } else { 'GLFW_KEY_LEFT_ALT' }
@@ -278,7 +322,9 @@ foreach ($version in $versions) {
     Assert-Contains -Path $windowedClient -Text 'FunctionalTestHarness' -Label "$version functional hook"
     Assert-Contains -Path $config -Text 'enableMod' -Label "$version config enableMod"
     Assert-Contains -Path $config -Text 'expandableInventory' -Label "$version config expandableInventory"
-    Assert-Contains -Path $config -Text 'enableGhostPins' -Label "$version config ghost pins"
+    Assert-NotMatches -Path $config -Pattern 'enableGhostPins|minimizableWindows|ghostWindowOpacity' -Label "$version removes retired window settings"
+    Assert-NotMatches -Path $client -Pattern 'WindowControl\.MINIMIZE|window\.minimized|window\.ghosted' -Label "$version removes collapsed and ghost window behavior"
+    Assert-Contains -Path $server -Text 'opener.salts_inventory_update$setOpenerVisible(player, visible)' -Label "$version persistent visibility owns native container viewers"
     Assert-Contains -Path $config -Text 'globalPins' -Label "$version config global pins"
     Assert-Contains -Path $configScreen -Text '"global_pins"' -Label "$version global pins config screen"
     Assert-Contains -Path $language -Text '"config.salts_inventory_update.global_pins"' -Label "$version global pins translation"
@@ -300,8 +346,16 @@ foreach ($version in $versions) {
     Assert-Contains -Path $server -Text 'Double.isFinite(range)' -Label "$version finite interaction-range validation"
     Assert-Contains -Path $server -Text 'SLOT_CLICKED_OUTSIDE' -Label "$version strict negative click-slot validation"
     Assert-Contains -Path $server -Text 'payload.targetKind() < DesktopPackets.QUICK_TARGET_DEFAULT' -Label "$version quick-move target discriminator lower bound"
-    Assert-Contains -Path $server -Text 'payload.targetKind() > DesktopPackets.QUICK_TARGET_HOTBAR' -Label "$version quick-move target discriminator upper bound"
-    Assert-Contains -Path $server -Text 'payload.targetKind() != DesktopPackets.QUICK_TARGET_SESSION' -Label "$version explicit session target bypasses vanilla result routing"
+    Assert-Matches -Path $packets -Pattern 'public static final int QUICK_TARGET_PLAYER_EQUIPMENT\s*=\s*3\s*;' -Label "$version quick-move equipment destination discriminator"
+    Assert-Matches -Path $packets -Pattern 'public static final int QUICK_TARGET_PLAYER_STORAGE\s*=\s*4\s*;' -Label "$version quick-move storage destination discriminator"
+    Assert-JavaMethodMatches -Path $server -SignaturePattern 'private static void quickMove\(ServerPlayer player, DesktopQuickMovePayload payload\)' -Pattern 'if\s*\(\s*payload\.targetKind\(\)\s*<\s*DesktopPackets\.QUICK_TARGET_DEFAULT\s*\|\|\s*payload\.targetKind\(\)\s*>\s*DesktopPackets\.QUICK_TARGET_PLAYER_STORAGE\b' -Label "$version quick-move target discriminator upper bound"
+    $craftingResultExclusion = switch ($version) {
+        '1.20.1' { '' }
+        '1.21.1' { '\s*&&\s*!\(source\.menu instanceof CraftingMenu\s*\|\|\s*source\.menu instanceof InventoryMenu\)' }
+        default { '\s*&&\s*!\(source\.menu instanceof AbstractCraftingMenu\)' }
+    }
+    Assert-JavaMethodMatches -Path $server -SignaturePattern 'private static boolean usesNativeResultQuickMove\(int targetKind, SlotSource source, int slotIndex\)' -Pattern "return\s+\(targetKind\s*==\s*DesktopPackets\.QUICK_TARGET_DEFAULT\s*\|\|\s*targetKind\s*==\s*DesktopPackets\.QUICK_TARGET_PLAYER_STORAGE$craftingResultExclusion\)\s*&&\s*isVanillaResultSource\(source,\s*slotIndex\)\s*;" -Label "$version explicit session target bypasses vanilla result routing"
+    Assert-JavaMethodMatches -Path $server -SignaturePattern 'private static void quickMove\(ServerPlayer player, DesktopQuickMovePayload payload\)' -Pattern 'if\s*\(usesNativeResultQuickMove\(payload\.targetKind\(\),\s*source,\s*payload\.sourceSlotIndex\(\)\)\)\s*\{' -Label "$version quick-move applies the native result destination gate"
     Assert-Contains -Path $server -Text 'public static void syncCraftingResult' -Label "$version detached crafting result custom sync"
     Assert-Contains -Path $craftingMenuMixin -Text 'DesktopContainerSessions.syncCraftingResult' -Label "$version crafting result recalculation bridge"
     Assert-Contains -Path $mixinConfig -Text 'server.CraftingMenuMixin' -Label "$version crafting result mixin registration"
@@ -385,8 +439,9 @@ Assert-Matches -Path $hotbarClient -Pattern '(?s)this\.kind == WindowKind\.INVEN
 Assert-Matches -Path $hotbarClient -Pattern '(?s)private int minResizableWidth\(InventoryWindow window\).{0,1200}INVENTORY_HOTBAR_WIDTH' -Label "$version inventory minimum width reserves hotbar"
 Assert-Contains -Path $hotbarClient -Text 'int reservedHeight = inventoryHotbarReservedHeight(window);' -Label "$version inventory grid layout reserves hotbar row"
 
-Assert-Matches -Path $hotbarClient -Pattern '(?s)private void renderCharacterWindow\([^)]*\).{0,2400}(?:returnHotbarToInventory.{0,900}offhandSlot|offhandSlot.{0,900}returnHotbarToInventory)' -Label "$version character window conditionally renders offhand"
-Assert-Matches -Path $hotbarClient -Pattern '(?s)private @Nullable SlotHit characterOffhandSlotAt\([^)]*\).{0,1200}returnHotbarToInventory.{0,1200}offhandSlot' -Label "$version character offhand hit helper is conditional"
+Assert-JavaMethodMatches -Path $hotbarClient -SignaturePattern 'private static boolean workspaceInventoryHud\(\)' -Pattern 'return\s+singleton\s*!=\s*null\s*&&\s*singleton\.workspaceHud\s*&&\s*singleton\.externallyPresented\(\)\s*\|\|\s*SaltsInventoryConfig\.get\(\)\.returnHotbarToInventory\s*;' -Label "$version workspace inventory HUD retains the return-hotbar config fallback"
+Assert-JavaMethodMatches -Path $hotbarClient -SignaturePattern 'private void renderCharacterWindow\([^)]*\)' -Pattern 'if\s*\(workspaceInventoryHud\(\)\)\s*\{\s*Slot offhand\s*=\s*offhandSlot\(menu\);\s*if\s*\(offhand\s*!=\s*null\)' -Label "$version character window conditionally renders offhand"
+Assert-JavaMethodMatches -Path $hotbarClient -SignaturePattern 'private @Nullable SlotHit characterOffhandSlotAt\([^)]*\)' -Pattern '(?s)\A\s*if\s*\(!workspaceInventoryHud\(\)\)\s*\{\s*return null;\s*\}.*?Slot slot\s*=\s*offhandSlot\(playerMenu\);' -Label "$version character offhand hit helper is conditional"
 Assert-Contains -Path $hotbarClient -Text 'SlotHit offhandHit = screen.characterOffhandSlotAt(this, mouseX, mouseY);' -Label "$version character window hits offhand"
 Assert-Contains -Path $hotbarClient -Text 'private static final int CHARACTER_MODEL_SLOT_GAP = CHARACTER_MODEL_X - (CHARACTER_ARMOR_X - 1 + SLOT_SIZE);' -Label "$version character offhand mirrors armor-model frame gap"
 Assert-Contains -Path $hotbarClient -Text 'private static final int CHARACTER_OFFHAND_X = CHARACTER_MODEL_X + CHARACTER_MODEL_WIDTH + CHARACTER_MODEL_SLOT_GAP + 1;' -Label "$version character offhand uses mirrored frame gap"
@@ -395,7 +450,7 @@ Assert-Contains -Path $hotbarClient -Text 'private static final int CHARACTER_CR
 Assert-Contains -Path $hotbarClient -Text 'private static final int CHARACTER_CRAFT_ARROW_Y = 31 + CHARACTER_CRAFT_VERTICAL_OFFSET;' -Label "$version character crafting arrow applies shared offset"
 Assert-Contains -Path $hotbarClient -Text 'private static final int CHARACTER_CRAFT_RESULT_Y = 31 + CHARACTER_CRAFT_VERTICAL_OFFSET;' -Label "$version character crafting result and recipe button apply shared offset"
 
-Assert-Matches -Path $hotbarClient -Pattern '(?s)private static int creativeWindowHeight\(\).{0,500}returnHotbarToInventory.{0,300}INVENTORY_HOTBAR_RESERVED_HEIGHT' -Label "$version creative window conditionally reserves hotbar footer"
+Assert-JavaMethodMatches -Path $hotbarClient -SignaturePattern 'private static int creativeWindowHeight\(\)' -Pattern 'int hotbarHeight\s*=\s*workspaceInventoryHud\(\)\s*\?\s*INVENTORY_HOTBAR_RESERVED_HEIGHT\s*:\s*0;\s*return TOP_BAR_HEIGHT\s*\+\s*CREATIVE_CONTENT_MARGIN\s*\*\s*2\s*\+\s*CREATIVE_CONTENT_HEIGHT\s*\+\s*hotbarHeight;' -Label "$version creative window conditionally reserves hotbar footer"
 Assert-Matches -Path $hotbarClient -Pattern '(?s)else if \(kind == WindowKind\.CREATIVE\).{0,500}creativeWindowWidth\(\).{0,200}creativeWindowHeight\(\)' -Label "$version new creative window uses hotbar-aware fixed size"
 Assert-Contains -Path $hotbarClient -Text 'case CREATIVE -> DesktopWindowSize.of(creativeWindowWidth(), creativeWindowHeight());' -Label "$version creative default size uses hotbar-aware height"
 Assert-Matches -Path $hotbarClient -Pattern '(?s)private DesktopWindowSize defaultInventoryPlacementAnchorSize\(WindowKind inventoryKind\).{0,500}DesktopWindowSize\.of\(creativeWindowWidth\(\), creativeWindowHeight\(\)\)' -Label "$version creative placement anchor uses hotbar-aware height"
@@ -422,7 +477,7 @@ Assert-Matches -Path $hotbarClient -Pattern '(?s)(?:usesInventoryWindowHotbar\(\
 
 $rootBuildScript = Join-Path $RepoRoot 'build.gradle.kts'
 $settingsScript = Join-Path $RepoRoot 'settings.gradle.kts'
-Assert-Contains -Path $rootBuildScript -Text 'version = "0.1.4"' -Label 'release version is 0.1.4'
+Assert-Contains -Path $rootBuildScript -Text 'version = "0.1.5"' -Label 'Core release version is 0.1.5'
 Assert-Contains -Path $rootBuildScript -Text 'org.jspecify:jspecify:1.0.0' -Label 'JSpecify is an explicit compile-only dependency'
 Assert-Contains -Path $rootBuildScript -Text '"**/compat/rei/SaltsReiClientPlugin.java"' -Label 'non-Fabric loaders exclude the Fabric REI entrypoint'
 Assert-NotContains -Path $rootBuildScript -Text '"**/compat/rei/**"' -Label 'non-Fabric loaders retain shared REI runtime support'
@@ -430,7 +485,7 @@ Assert-Contains -Path $rootBuildScript -Text '"**/compat/emi/SaltsEmiClientPlugi
 Assert-Contains -Path $rootBuildScript -Text 'val includeEmiRuntime' -Label 'EMI development runtime is opt-in'
 Assert-Contains -Path $rootBuildScript -Text '"1.21.1" to "1.1.24+1.21.1"' -Label 'EMI dependency is pinned for 1.21.1'
 Assert-NotContains -Path $rootBuildScript -Text '"--mixin.config", "salts_inventory_update.mixins.json"' -Label 'development runs do not duplicate the loader-supplied mixin config'
-Assert-Contains -Path $settingsScript -Text 'id("dev.prism.settings") version "0.5.17"' -Label 'Prism settings plugin version is reproducibly pinned'
+Assert-Contains -Path $settingsScript -Text 'id("dev.prism.settings") version "0.6.4"' -Label 'Prism settings plugin version is reproducibly pinned'
 
 $sophisticatedTargets = @(
     @{ Version = '1.20.1'; Loader = 'forge'; Metadata = 'mods.toml'; OptionalMarker = 'mandatory = false' },
@@ -444,9 +499,9 @@ foreach ($target in $sophisticatedTargets) {
     $version = $target.Version
     $loader = $target.Loader
     $label = "$version $loader"
-    $nonFabricRoot = Join-Path $RepoRoot "versions\$version\$loader"
+    $nonFabricRoot = Join-Path $RepoRoot "compatibility\versions\$version\$loader"
     $fabricRoot = Join-Path $RepoRoot "versions\$version\fabric"
-    $mixinConfigPath = Join-Path $nonFabricRoot 'src\main\resources\salts_inventory_update.sophisticated.mixins.json'
+    $mixinConfigPath = Join-Path $nonFabricRoot 'src\main\resources\salts_inventory_compat.sophisticated.mixins.json'
     $metadataPath = Join-Path $nonFabricRoot "src\main\resources\META-INF\$($target.Metadata)"
     $fabricMetadataPath = Join-Path $fabricRoot 'src\main\resources\fabric.mod.json'
     $compatRoot = Join-Path $nonFabricRoot 'src\main\java\com\salts_inventory_update\compat\sophisticated'
@@ -494,9 +549,9 @@ foreach ($target in $sophisticatedTargets) {
     }
 }
 
-$sophisticatedNeoForgeRoot = Join-Path $RepoRoot 'versions\26.2\neoforge'
+$sophisticatedNeoForgeRoot = Join-Path $RepoRoot 'compatibility\versions\26.2\neoforge'
 $sophisticatedFabricRoot = Join-Path $RepoRoot 'versions\26.2\fabric'
-$sophisticatedMixinConfig = Join-Path $sophisticatedNeoForgeRoot 'src\main\resources\salts_inventory_update.sophisticated.mixins.json'
+$sophisticatedMixinConfig = Join-Path $sophisticatedNeoForgeRoot 'src\main\resources\salts_inventory_compat.sophisticated.mixins.json'
 $sophisticatedNeoForgeMetadata = Join-Path $sophisticatedNeoForgeRoot 'src\main\resources\META-INF\neoforge.mods.toml'
 $sophisticatedFabricMetadata = Join-Path $sophisticatedFabricRoot 'src\main\resources\fabric.mod.json'
 $sophisticatedHostedDefinition = Join-Path $sophisticatedNeoForgeRoot 'src\main\java\com\salts_inventory_update\compat\sophisticated\client\SophisticatedHostedScreenDefinition.java'
@@ -525,14 +580,14 @@ $sophisticatedCoreCompat = Join-Path $sophisticatedNeoForgeRoot 'src\main\java\c
 Assert-File -Path $sophisticatedMixinConfig -Label '26.2 NeoForge Sophisticated mixin config' | Out-Null
 Assert-Contains -Path $sophisticatedNeoForgeMetadata -Text 'config = "${mod_id}.sophisticated.mixins.json"' -Label '26.2 NeoForge registers its Sophisticated mixin config'
 Assert-NotContains -Path $sophisticatedFabricMetadata -Text 'sophisticated' -Label '26.2 Fabric metadata remains free of Sophisticated integration'
-Assert-Matches -Path $rootBuildScript -Pattern '(?s)if \(minecraftVersion != null && name in setOf\("forge", "neoforge"\)\).{0,1800}compileOnly' -Label 'Sophisticated dependencies are scoped to every Forge and NeoForge target'
+Assert-Matches -Path $rootBuildScript -Pattern '(?s)if \(compatibilityModule && minecraftVersion != null && name in setOf\("forge", "neoforge"\)\).{0,1800}compileOnly' -Label 'Sophisticated dependencies are scoped to every Forge and NeoForge target'
 Assert-Matches -Path $rootBuildScript -Pattern '(?s)name == "forge" && minecraftVersion == "1\.20\.1".{0,1800}sophisticatedForgeRuntimeNamed.{0,900}attribute\(mappingsAttribute, namedMappings\).{0,1200}classpath \+= files\(sophisticatedForgeRuntimeNamed\)' -Label '1.20.1 Forge development runtime remaps Sophisticated production jars to named mappings'
 Assert-Matches -Path $rootBuildScript -Pattern '(?s)runTask\.workingDir.{0,200}resolve\("mods"\).{0,500}file\.name\.startsWith\("jei-"\).{0,600}project\.delete\(staleJeiJars\).{0,500}managed by -PincludeJeiRuntime' -Label 'development runs remove stale JEI jars before applying the managed JEI runtime option'
 Assert-Matches -Path $rootBuildScript -Pattern '(?s)neoForgeJeiVersions = mapOf\(.{0,500}"26\.2" to "30\.7\.0\.39".{0,500}"1\.21\.11" to "27\.13\.0\.43".{0,500}"1\.21\.1" to "19\.32\.0\.359"' -Label 'NeoForge JEI pins satisfy the selected Sophisticated Core versions'
 Assert-Matches -Path $rootBuildScript -Pattern '(?s)val jeiVersion = if \(name == "neoforge"\).{0,250}neoForgeJeiVersions\[minecraftVersion\] \?: jeiVersions\[minecraftVersion\].{0,150}else \{\s*jeiVersions\[minecraftVersion\]' -Label 'Fabric retains its independent JEI version pins'
 Assert-Matches -Path $legacyDesktopContainerSessions -Pattern '(?s)SessionSynchronizer synchronizer = new SessionSynchronizer\(player, session\).{0,400}DesktopSynchronizerOverride\.run\(\s*synchronizer,.{0,250}session\.menu\.setSynchronizer\(synchronizer\)' -Label '1.20.1 preserves the detached Salt synchronizer while Sophisticated initializes high-stack synchronization'
 Assert-Contains -Path $legacyDesktopContainerSessions -Text 'SessionSynchronizer implements ContainerSynchronizer, DesktopSessionSynchronizer' -Label '1.20.1 detached synchronizer carries the preservation marker consumed by Sophisticated mixins'
-Assert-Matches -Path $rootBuildScript -Pattern '(?s)minecraftVersion in setOf\("1\.20\.1", "1\.21\.1", "1\.21\.11", "26\.1\.2", "26\.2"\).{0,300}loader in setOf\("forge", "neoforge"\).{0,500}sophisticatedMixin !in entries' -Label 'release verification requires the Sophisticated mixin on every Forge and NeoForge target'
+Assert-Contains -Path (Join-Path $RepoRoot 'tools\verify-module-boundaries.py') -Text 'sophisticated.mixins' -Label 'release verification isolates Sophisticated mixins from core'
 Assert-NotMatches -Path $sophisticatedHostedDefinition -Pattern '(?m)^\s*(?!//).*\.\s*extract(?:Background|Contents)\s*\(' -Label 'Sophisticated host does not invoke whole-screen rendering'
 Assert-Matches -Path $sophisticatedHostedDefinition -Pattern '(?s)translateDetachedTabChildren\(composite, dx, dy\).{0,1800}attachedChildren\.contains\(child\).{0,400}child\.setPosition\(new Position\(child\.getX\(\) \+ dx, child\.getY\(\) \+ dy\)\)' -Label 'Sophisticated closed-tab controls follow hosted window movement exactly once'
 Assert-Matches -Path $sophisticatedHostedDefinition -Pattern '(?s)tab instanceof SophisticatedHostedPositionAccess positionAccess.{0,300}positionAccess\.salts_inventory_update\$translateHostedPosition\(dx, dy\).{0,700}child instanceof SophisticatedHostedPositionAccess positionAccess.{0,300}positionAccess\.salts_inventory_update\$translateHostedPosition\(dx, dy\)' -Label 'Sophisticated cached tab geometry receives each nonzero hosted movement delta'
@@ -589,30 +644,35 @@ Assert-Matches -Path $desktopContainerSession -Pattern '(?s)DesktopMenuBindings\
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)boolean apiInitialized = this\.initializeApiWindow\(window, apiDefinition, apiSetup\);.{0,1200}!apiInitialized.{0,900}window\.apiDefinition = null;.{0,500}window\.width = Math\.min\(defaultWindowWidth.{0,900}this\.sessions\.add\(session\);.{0,1200}this\.sessions\.remove\(transitionReplacedSession\);' -Label '26.2 hosted session transitions fall back to the reconstructed incoming menu before committing old-window removal'
 Assert-Contains -Path $desktopPackets -Text 'clientboundPlay().register(DesktopMutationAckPayload.TYPE, DesktopMutationAckPayload.CODEC);' -Label '26.2 registers the clientbound mutation acknowledgement'
 Assert-Matches -Path $desktopPackets -Pattern '(?s)record DesktopMutationAckPayload\(.{0,300}long connectionNonce,.{0,200}long playerSessionToken,.{0,200}long mutationId,.{0,200}boolean sequenceAccepted' -Label '26.2 mutation acknowledgements carry connection, player-token, and sequence authentication'
-Assert-Count -Path $desktopPackets -Text 'long mutationId' -Expected 15 -Label '26.2 mutation id is carried by all fourteen mutators and their acknowledgement'
 $serializedMutationPayloads = @(
     'InventorySlotPurchasePayload',
     'DesktopClickPayload',
     'DesktopDragSlotsPayload',
     'DesktopPickupAllPayload',
+    'DesktopSortWindowsPayload',
     'DesktopQuickMoveAllPayload',
     'DesktopBundleSelectPayload',
     'DesktopQuickMovePayload',
     'DesktopButtonPayload',
     'DesktopPlaceRecipePayload',
+    'DesktopRecipeHoverPayload',
+    'DesktopCraftToWindowPayload',
+    'DesktopCookingRecipePayload',
     'DesktopJeiTransferPayload',
     'DesktopRenamePayload',
     'DesktopCustomPayload',
     'DesktopCarriedPayload'
 )
+Assert-Count -Path $desktopPackets -Text 'long mutationId' -Expected ($serializedMutationPayloads.Count + 1) -Label '26.2 mutation id is carried by every direct mutator and its acknowledgement'
 foreach ($mutationPayload in $serializedMutationPayloads) {
     $escapedPayload = [regex]::Escape($mutationPayload)
     Assert-Matches -Path $desktopPackets -Pattern "(?s)record $escapedPayload\(.{0,160}long mutationId,.{0,160}long playerSessionToken" -Label "26.2 $mutationPayload binds its mutation id to the player-session epoch"
 }
 Assert-Matches -Path $desktopContainerClient -Pattern '(?s)private static boolean queueMutation\(.{0,1500}inFlightMutation != null.{0,1800}queued\.factory\(\)\.create\(mutationId\).{0,1500}nextMutationId = mutationId' -Label '26.2 client serializes shared-cursor mutations with dispatch-time packet construction'
 Assert-Matches -Path $desktopContainerClient -Pattern '(?s)queueMutation\("click".{0,500}SessionAuth auth = sessionAuth\(sessionId\);.{0,250}ItemStack carried = currentClientCarried\(\);.{0,500}auth\.stateId\(\)' -Label '26.2 queued clicks resolve current authentication, state, and carried stack at dispatch'
-Assert-Count -Path $desktopContainerClient -Text 'queueMutation("' -Expected 14 -Label '26.2 routes all item and menu mutations through one global client lane'
-Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)private QuickMoveTarget quickMoveTarget\(.{0,900}this\.sessions\.contains\(focusedWindow\.session\).{0,250}!focusedWindow\.minimized.{0,150}!focusedWindow\.ghosted.{0,150}!focusedWindow\.persistentHidden' -Label '26.2 cross-window quick moves target only registered visible focused sessions'
+Assert-Count -Path $desktopContainerClient -Text 'queueMutation("' -Expected 16 -Label '26.2 routes item, menu, crafting, and cooking mutations through one global client lane'
+Assert-JavaMethodMatches -Path $desktopContainerClient -SignaturePattern 'private static boolean queueRecipeHover\(int session, long epoch, int action, int recipeIndex\)' -Pattern '(?s)return queueMutation\(label, Set\.of\(session\), mutationId ->\s*\{.*new DesktopPackets\.DesktopRecipeHoverPayload\(CONNECTION\.connectionNonce\(\), mutationId, playerSessionToken,' -Label '26.2 recipe hover mutations share the authenticated global client lane'
+Assert-JavaMethodMatches -Path $desktopInventoryScreen -SignaturePattern 'private QuickMoveTarget quickMoveTarget\(SlotHit hit\)' -Pattern 'if\s*\(focusedWindow\s*!=\s*null\s*&&\s*focusedWindow\.kind\s*==\s*WindowKind\.CONTAINER\s*&&\s*focusedWindow\.session\s*!=\s*null\s*&&\s*this\.sessions\.contains\(focusedWindow\.session\)\s*&&\s*!focusedWindow\.persistentHidden\s*&&\s*focusedWindow\.session\.sessionId\(\)\s*!=\s*hit\.sessionId\(\)\)\s*\{\s*targetKind\s*=\s*DesktopPackets\.QUICK_TARGET_SESSION;\s*targetSessionId\s*=\s*focusedWindow\.session\.sessionId\(\);' -Label '26.2 cross-window quick moves target only registered visible focused sessions'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)private void applyDragDistribution\((?:(?!\r?\n    private).)*List<DesktopContainerClient\.SlotTarget> targets = slots\.stream\(\)(?:(?!\r?\n    private).)*DesktopContainerClient\.dragSlots\(drag\.quickCraftType\(\), targets\)' -Label '26.2 non-legacy mixed-window drags use one authenticated cross-session batch'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)private @Nullable DragDistribution activeDragPreview\((?:(?!\r?\n    private).)*this\.dragDistribution\.size\(\) == 0' -Label '26.2 an activated drag preview remains visible while revisiting its targets'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)public void texturelessSlot\((?:(?!\r?\n        @Override).)*DragSlotPreview dragPreview = InventoryDesktopScreen\.this\.dragSlotPreview\(slot\)(?:(?!\r?\n        @Override).)*if \(dragPreview != null\)(?:(?!\r?\n        @Override).)*renderItemStack\(' -Label 'Sophisticated textureless slots render live drag previews before acknowledgement'
@@ -624,8 +684,11 @@ Assert-Matches -Path $desktopContainerClient -Pattern '(?s)public static boolean
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)private void selectBundleItem\(.{0,900}if \(!sent\).{0,700}else \{.{0,300}BundleItem\.toggleSelectedItem' -Label '26.2 optimistic bundle selection occurs only after its mutation intent is accepted'
 Assert-Matches -Path $desktopContainerClient -Pattern '(?s)acceptMutationAck\(DesktopMutationAckPayload payload\).{0,500}CAP_MULTI_MENU_GESTURES.{0,300}payload\.playerSessionToken\(\) != playerSessionToken.{0,1200}payload\.mutationId\(\) != inFlight\.mutationId\(\).{0,900}dispatchNextMutation\(\)' -Label '26.2 client validates mutation acknowledgement nonce, token, id, and ordering'
 Assert-Matches -Path $desktopContainerClient -Pattern '(?s)MUTATION_TIMEOUT_NANOS.{0,40000}markTimedOut\(\);.{0,200}discardPendingMutations\("ack-timeout"\);.{0,200}mutationQueueBlocked = true' -Label '26.2 mutation timeout fails closed while allowing a late acknowledgement to recover'
-Assert-Count -Path $desktopContainerSessions -Text 'context.player(), payload.connectionNonce(), payload.playerSessionToken(), payload.mutationId()' -Expected 14 -Label '26.2 wraps all fourteen item and menu mutation receivers in the serialized server lane'
-Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void handleMutation\(.{0,2200}authorizesMutationConnection\(connectionNonce, playerSessionToken\).{0,700}acceptMutation\(mutationId\).{0,3000}finally \{.{0,300}finishMutation' -Label '26.2 server authenticates the player epoch and monotonically orders every queued mutation'
+Assert-Count -Path $desktopContainerSessions -Text 'context.player(), payload.connectionNonce(), payload.playerSessionToken(), payload.mutationId()' -Expected 16 -Label '26.2 wraps direct item, menu, crafting, and cooking receivers in the serialized server lane'
+Assert-Matches -Path $desktopPackets -Pattern 'record DesktopCraftStackToWindowPayload\(DesktopCraftToWindowPayload request\)' -Label '26.2 stack crafting reuses the authenticated single-craft request'
+Assert-Contains -Path $desktopContainerSessions -Text 'context.player(), payload.request().connectionNonce(), payload.request().playerSessionToken(), payload.request().mutationId(), "craft-stack-to-window"' -Label '26.2 stack crafting retains request authentication in the serialized server lane'
+Assert-JavaMethodMatches -Path $desktopContainerSessions -SignaturePattern 'private static void handleRecipeHoverMutation\(ServerPlayer player, DesktopPackets\.DesktopRecipeHoverPayload payload\)' -Pattern 'handleMutation\(player, payload\.connectionNonce\(\), payload\.playerSessionToken\(\), payload\.mutationId\(\),' -Label '26.2 recipe hover authenticates and orders mutations through the serialized server lane'
+Assert-JavaMethodMatches -Path $desktopContainerSessions -SignaturePattern 'private static void handleMutation\(\s*ServerPlayer player, long connectionNonce, long playerSessionToken, long mutationId, String operation,\s*double preAuthorizationCost, Runnable mutation, Runnable beforeAcknowledgement\s*\)' -Pattern '(?s)authorizesMutationConnection\(connectionNonce, playerSessionToken\).*acceptMutation\(mutationId\).*finally\s*\{\s*try\s*\{\s*beforeAcknowledgement\.run\(\);\s*\}\s*finally\s*\{\s*if \(acknowledge\) finishMutation\(player, sessions, mutationId, sequenceAccepted\);' -Label '26.2 server authenticates and orders mutations before cleanup and acknowledgement'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void finishMutation\(.{0,700}new DesktopMutationAckPayload\(.{0,300}sequenceAccepted' -Label '26.2 server acknowledges every authenticated sequence after handler-owned synchronization'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)sequence rejected player=.{0,700}allowResync\(player, operation \+ "-sequence"\).{0,200}resyncGesture\(player, sessions\)' -Label '26.2 rejected sequences use the strict resync limiter before a full-session snapshot'
 Assert-NotMatches -Path $desktopContainerSessions -Pattern '(?s)private static void finishMutation\(.{0,500}broadcastGesture\(' -Label '26.2 mutation acknowledgements do not add an unconditional full-session broadcast'
@@ -636,7 +699,7 @@ Assert-Contains -Path $desktopMenuSlots -Text 'default boolean allowsTargetedQui
 Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)allowsTargetedQuickMoveSource\(.{0,500}slot instanceof StorageUpgradeSlot.{0,200}getSlotUpgradeContainer\(slot\)\.isEmpty\(\)' -Label 'Sophisticated upgrade and upgrade-panel slots cannot use cross-menu quick-move routing'
 Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)SETTINGS_MENU_GESTURE_POLICY.{0,1800}allowsTargetedQuickMoveSource\(.{0,200}return false;' -Label 'Sophisticated settings slots cannot use cross-menu quick-move routing'
 Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)SETTINGS_MENU_GESTURE_POLICY.{0,1600}allowsPickupAllAnchor\(.{0,250}return false;' -Label 'Sophisticated settings slots cannot anchor desktop-wide pickup-all'
-Assert-Count -Path $desktopContainerSessions -Text 'allowsQuickMoveRouting(' -Expected 4 -Label '26.2 server enforces special-source routing for single and batch quick moves'
+Assert-Count -Path $desktopContainerSessions -Text 'allowsQuickMoveRouting(' -Expected 5 -Label '26.2 server enforces special-source routing for single, batch, and crafting quick moves'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void quickMove\(.{0,5000}!allowsQuickMoveRouting\(source\.menu, source\.slot, payload\.targetKind\(\)\).{0,500}resyncGesture\(player, sessions\);' -Label '26.2 server rejects disallowed targets for special quick-move sources'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void quickMoveAll\(.{0,5000}for \(AuthorizedSlot source : sources\).{0,1800}!allowsQuickMoveRouting\(source\.authorization\(\)\.menu\(\), slot, payload\.targetKind\(\)\).{0,500}resyncGesture\(player, sessions\);' -Label '26.2 server validates every special source before a batch quick move'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static boolean allowsQuickMoveRouting\(.{0,500}DesktopMenuBindings\.allowsTargetedQuickMoveSource\(menu, slot\).{0,300}targetKind == DesktopPackets\.QUICK_TARGET_DEFAULT.{0,200}DesktopMenuBindings\.useNativeQuickMove\(menu\)' -Label '26.2 default-only native quick moves cannot bypass special-source policy'
@@ -652,7 +715,7 @@ Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void rollbackDrag\(.{0,1800}for \(int index = plans\.size\(\) - 1; index >= 0; index--\).{0,1500}restoreSlot\(.{0,1800}observedTargetGain.{0,1800}setSharedCarried\(player, sessions, reconciledCarried\)' -Label '26.2 failed mixed drags restore targets in reverse and reconcile the cursor to any unreverted credit'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void pickupAll\((?:(?!\r?\n    private static).)*new PickupTargetPlan\((?:(?!\r?\n    private static).)*safeTake\((?:(?!\r?\n    private static).)*verifyPickupSources\(plans\)(?:(?!\r?\n    private static).)*rollbackPickupAll\(' -Label '26.2 pickup-all snapshots and verifies every physical source transactionally'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void rollbackPickupAll\((?:(?!\r?\n    private static).)*for \(int index = touched\.size\(\) - 1; index >= 0; index--\)(?:(?!\r?\n    private static).)*matchesPhysicalSlot\((?:(?!\r?\n    private static).)*observedSourceLoss\((?:(?!\r?\n    private static).)*setSharedCarried\(player, sessions, reconciledCarried\)' -Label '26.2 failed pickup-all restores unique sources and preserves only proven cursor credit'
-Assert-Count -Path $desktopContainerSessions -Text 'new QuickMoveWorkBudget(MAX_QUICK_MOVE_TRANSACTION_WORK)' -Expected 3 -Label '26.2 single, batch, and sort moves allocate hard work budgets'
+Assert-Count -Path $desktopContainerSessions -Text 'new QuickMoveWorkBudget(MAX_QUICK_MOVE_TRANSACTION_WORK)' -Expected 4 -Label '26.2 single, batch, sort, and crafting moves allocate hard work budgets'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void quickMoveAll\((?:(?!\r?\n    private static).)*QuickMoveWorkBudget quickMoveWork = new QuickMoveWorkBudget\(MAX_QUICK_MOVE_TRANSACTION_WORK\)(?:(?!\r?\n    private static).)*for \(QuickMoveSourceSnapshot source : sourceSnapshots\)(?:(?!\r?\n    private static).)*moveSlotStack\((?:(?!\r?\n    private static).)*quickMoveWork' -Label '26.2 batch quick move shares one bounded validation budget across every source'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static boolean moveSlotStack\((?:(?!\r?\n    private static).)*workBudget\.consume\((?:(?!\r?\n    private static).)*try \{(?:(?!\r?\n    private static).)*insertIntoMatchingSlots\(' -Label '26.2 quick move reserves worst-case validation work before slot callbacks'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static int insertQuickMoveTarget\(.{0,1400}ItemStack attempt = sourceBefore\.copy\(\).{0,900}returnedRemainder\[0\] = target\.safeInsert\(attempt\)' -Label '26.2 generic quick moves use the target callback returned remainder'
@@ -672,15 +735,15 @@ Assert-Matches -Path $desktopItemSourceLocks -Pattern '(?s)hasLockedSourceInRang
 Assert-Matches -Path $sophisticatedBackpackItemLocks -Pattern '(?s)ContextType\.ITEM_BACKPACK.{0,500}saltsInventoryUpdate\$getHandlerName\(\).{0,500}switch \(handlerName\).{0,700}MAIN_INVENTORY.{0,300}OFFHAND_INVENTORY.{0,300}ARMOR_INVENTORY.{0,1000}getPlayerInventoryHandler\(handlerName\).{0,800}getStackInSlot\(player, itemContext\.saltsInventoryUpdate\$getIdentifier\(\), handlerSlot\).{0,800}getContentsUuid\(\).{0,600}matchesContentsUuid\(stack, contentsUuid\)' -Label 'Sophisticated source resolver locks the exact top-level held or worn item Backpack'
 Assert-Matches -Path $sophisticatedBackpackItemLocks -Pattern '(?s)matchesContentsUuid\(ItemStack stack, UUID contentsUuid\).{0,300}BackpackWrapper\.fromStack\(stack\)\.getContentsUuid\(\)\.filter\(contentsUuid::equals\)' -Label 'Sophisticated source identity survives mutable Backpack component updates via contents UUID'
 Assert-Contains -Path $sophisticatedBackpacksCompat -Text 'SophisticatedBackpackItemLocks.register(backpack, settings);' -Label '26.2 NeoForge registers item Backpack locks for main and settings menus'
-Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)TransferItemsPayload\.TYPE\.id\(\)(?:(?!\r?\n        register).)*!payload\.transferToInventory\(\)(?:(?!\r?\n        register).)*DesktopItemSourceLocks\.hasLockedSourceInRange\(context\.player\(\), 9, Inventory\.INVENTORY_SIZE\)(?:(?!\r?\n        register).)*context\.broadcastChanges\(\);\s*return;' -Label 'Sophisticated bulk transfer-to-storage cannot move an open item Backpack into itself'
+Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)TransferItemsPayload\.TYPE\.id\(\)(?:(?!\r?\n        register).)*!payload\.transferToInventory\(\)(?:(?!\r?\n        register).)*DesktopItemSources\.hasLockedSourceInRange\(context\.player\(\), 9, Inventory\.INVENTORY_SIZE\)(?:(?!\r?\n        register).)*context\.broadcastChanges\(\);\s*return;' -Label 'Sophisticated bulk transfer-to-storage cannot move an open item Backpack into itself'
 Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)TransferFullSlotPayload\.TYPE\.id\(\).{0,300}runForValidUnlockedSlot\(context, payload\.slotId\(\)' -Label 'Sophisticated full-slot transfers use the locked-source-aware handler'
-Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)private static void runForValidUnlockedSlot\((?:(?!\r?\n    private static).)*DesktopItemSourceLocks\.isSlotLocked\(context\.player\(\), DesktopMenuBindings\.slot\(context\.menu\(\), slotId\)\)' -Label 'Sophisticated full-slot transfer rejects the exact locked Backpack source'
+Assert-Matches -Path $sophisticatedCoreCompat -Pattern '(?s)private static void runForValidUnlockedSlot\((?:(?!\r?\n    private static).)*DesktopItemSources\.isSlotLocked\(context\.player\(\), DesktopMenuBindings\.slot\(context\.menu\(\), slotId\)\)' -Label 'Sophisticated full-slot transfer rejects the exact locked Backpack source'
 Assert-Matches -Path $sophisticatedMixinPlugin -Pattern '(?s)mixinClassName\.endsWith\("\.BackpackContextItemAccessor"\).{0,200}mixinClassName\.endsWith\("\.ServerGamePacketListenerItemLockMixin"\).{0,200}return this\.backpacksEnabled;' -Label 'item-lock mixins remain guarded by Sophisticated Backpacks presence'
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)hasOpenSessionMatching\(Player player, Predicate<AbstractContainerMenu> menuPredicate\).{0,800}menuPredicate\.test\(session\.menu\)' -Label 'detached menu ownership can be checked without exposing session state'
 Assert-Matches -Path $sophisticatedStorageOpenersMixin -Pattern '(?s)counter instanceof SophisticatedOpenersCounter.{0,500}hasOpenSessionMatching.{0,900}player\.containerMenu = desktopMenu;.{0,500}counter\.isOwnContainer\(player\).{0,300}finally \{\s*player\.containerMenu = previousMenu;' -Label 'Sophisticated physical storage opener checks use official ownership semantics for detached menus'
 Assert-Matches -Path $sophisticatedMixinPlugin -Pattern '(?s)mixinClassName\.endsWith\("\.SophisticatedStorageOpenersMixin"\).{0,150}return this\.storageEnabled;' -Label 'storage opener mixin remains guarded by Sophisticated Storage presence'
 Assert-Matches -Path $desktopContainerSession -Pattern '(?s)this\.sourceLock = DesktopItemSourceLocks\.acquire\(player, menu\).{0,2500}public void close\(\).{0,300}this\.sourceLock\.close\(\)' -Label 'client detached sessions hold and release item-source leases'
-Assert-Matches -Path $desktopContainerClient -Pattern '(?s)DesktopContainerSession session = null;\s*boolean sessionHandedOff = false;.{0,1200}openOrAddSession\(context\.client\(\), session, payload\.visible\(\)\);\s*sessionHandedOff = true;.{0,500}if \(!sessionHandedOff && session != null\) \{\s*session\.close\(\);' -Label 'failed client reconstruction releases its provisional item-source lease'
+Assert-Matches -Path $desktopContainerClient -Pattern '(?s)DesktopContainerSession session = null;\s*boolean sessionHandedOff = false;(?:(?!ClientPlayNetworking\.registerGlobalReceiver).)*openOrAddSession\(context\.client\(\), session, payload\.visible\(\)\);\s*sessionHandedOff = true;(?:(?!ClientPlayNetworking\.registerGlobalReceiver).)*catch \(RuntimeException exception\) \{\s*if \(!sessionHandedOff && session != null\) \{\s*session\.close\(\);' -Label 'failed client reconstruction releases its provisional item-source lease'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)public void removeSession\(int sessionId\).{0,500}session\.close\(\)' -Label 'client session removal releases its item-source lease'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)this\.sessions\.remove\(transitionReplacedSession\);\s*transitionReplacedSession\.close\(\)' -Label 'client atomic session transitions release the replaced item-source lease'
 Assert-Matches -Path $desktopInventoryScreen -Pattern '(?s)private void clearForOwnerChange\(String reason\).{0,1200}for \(DesktopContainerSession session : this\.sessions\) \{\s*session\.close\(\);\s*\}\s*this\.sessions\.clear\(\)' -Label 'client disconnect and owner teardown release every item-source lease'
@@ -694,11 +757,11 @@ Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void
 Assert-Matches -Path $desktopContainerSessions -Pattern '(?s)private static void quickMove\(.{0,11000}targets\.removeIf\(slot -> DesktopItemSourceLocks\.isSlotLocked\(player, slot\)\)' -Label 'authenticated Salt quick moves reject locked Backpack destinations'
 Assert-Contains -Path $desktopContainerSessions -Text 'DesktopItemSourceLocks.shouldRejectClick(player, menu, slotIndex, button, input, effectiveCarried)' -Label 'authenticated Salt clicks reject the locked Backpack source'
 Assert-Count -Path $desktopContainerSessions -Text 'DesktopItemSourceLocks.anyLockedSourceMatches(' -Expected 2 -Label 'vanilla and JEI recipe transfers both exclude the locked Backpack source'
-Assert-Matches -Path $sophisticatedServerItemLockMixin -Pattern '(?s)@Inject\(method = "handleContainerClick".{0,900}DesktopItemSourceLocks\.shouldRejectClick.{0,800}@Inject\(method = "handlePlayerAction".{0,1000}@Inject\(method = "handleUseItem".{0,700}@Inject\(method = "handleUseItemOn".{0,700}@Inject\(method = "handleInteract".{0,700}@Inject\(method = "handleSetCreativeModeSlot".{0,1200}@Inject\(method = "tryPickItem"' -Label 'NeoForge server rejects vanilla click, drop, swap, use, creative, and pick packets for the locked Backpack source'
+Assert-Matches -Path $sophisticatedServerItemLockMixin -Pattern '(?s)@Inject\(method = "handleContainerClick".{0,900}DesktopItemSources\.shouldRejectClick.{0,800}@Inject\(method = "handlePlayerAction".{0,1000}@Inject\(method = "handleUseItem".{0,700}@Inject\(method = "handleUseItemOn".{0,700}@Inject\(method = "handleInteract".{0,700}@Inject\(method = "handleSetCreativeModeSlot".{0,1200}@Inject\(method = "tryPickItem"' -Label 'NeoForge server rejects vanilla click, drop, swap, use, creative, and pick packets for the locked Backpack source'
 Assert-Contains -Path $sophisticatedBackpackContextAccessor -Text '@Accessor("handlerName")' -Label 'Sophisticated item context exposes its top-level handler identity'
 
 $fabricSourceLockRegistrations = @(Get-ChildItem -LiteralPath (Join-Path $sophisticatedFabricRoot 'src\main\java') -Recurse -Filter '*.java' -File |
-    Where-Object { (Get-Content -LiteralPath $_.FullName -Raw).Contains('DesktopItemSourceLocks.register(') })
+    Where-Object { $_.FullName -notlike '*\api\*' -and (Get-Content -LiteralPath $_.FullName -Raw).Contains('DesktopItemSourceLocks.register(') })
 if ($fabricSourceLockRegistrations.Count -ne 0) {
     Add-Failure "26.2 Fabric unexpectedly registers item-source locking in: $($fabricSourceLockRegistrations.FullName -join ', ')"
 } else {
@@ -733,21 +796,21 @@ foreach ($version in $versions) {
         Assert-NotContains -Path $fabricMetadata -Text 'rei_client' -Label '26.3 omits REI until a compatible release exists'
         continue
     }
-    $runtimeRei = Join-Path $RepoRoot "versions\$version\fabric\src\main\java\com\salts_inventory_update\compat\rei\RuntimeReiRecipeBrowserAccess.java"
+    $runtimeRei = Join-Path $RepoRoot "compatibility\versions\$version\fabric\src\main\java\com\salts_inventory_update\compat\rei\RuntimeReiRecipeBrowserAccess.java"
     Assert-File -Path $runtimeRei -Label "$version shared REI runtime access retained" | Out-Null
 
     $nonFabricLoader = if ($version -eq '1.20.1') { 'forge' } else { 'neoforge' }
-    $nonFabricRei = Join-Path $RepoRoot "versions\$version\$nonFabricLoader\src\main\java\com\salts_inventory_update\compat\rei\SaltsReiForgeClientPlugin.java"
+    $nonFabricRei = Join-Path $RepoRoot "compatibility\versions\$version\$nonFabricLoader\src\main\java\com\salts_inventory_update\compat\rei\SaltsReiForgeClientPlugin.java"
     Assert-File -Path $nonFabricRei -Label "$version non-Fabric REI client plugin retained" | Out-Null
 }
 
 $versionDifferences = Join-Path $RepoRoot 'version_differences.md'
-$emiRuntime = Join-Path $RepoRoot 'versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\RuntimeEmiRecipeBrowserAccess.java'
-$emiBootstrap = Join-Path $RepoRoot 'versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\EmiRecipeBrowserBootstrap.java'
-$emiFabricPlugin = Join-Path $RepoRoot 'versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\SaltsEmiClientPlugin.java'
-$emiNeoForgePlugin = Join-Path $RepoRoot 'versions\1.21.1\neoforge\src\main\java\com\salts_inventory_update\compat\emi\SaltsEmiForgeClientPlugin.java'
-$emiFabricMetadata = Join-Path $RepoRoot 'versions\1.21.1\fabric\src\main\resources\fabric.mod.json'
-$emiClientStartup = Join-Path $RepoRoot 'versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\client\WindowedInventoryClient.java'
+$emiRuntime = Join-Path $RepoRoot 'compatibility\versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\RuntimeEmiRecipeBrowserAccess.java'
+$emiBootstrap = Join-Path $RepoRoot 'compatibility\versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\EmiRecipeBrowserBootstrap.java'
+$emiFabricPlugin = Join-Path $RepoRoot 'compatibility\versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\emi\SaltsEmiClientPlugin.java'
+$emiNeoForgePlugin = Join-Path $RepoRoot 'compatibility\versions\1.21.1\neoforge\src\main\java\com\salts_inventory_update\compat\emi\SaltsEmiForgeClientPlugin.java'
+$emiFabricMetadata = Join-Path $RepoRoot 'compatibility\versions\1.21.1\fabric\src\main\resources\fabric.mod.json'
+$emiClientStartup = Join-Path $RepoRoot 'compatibility\versions\1.21.1\fabric\src\main\java\com\salts_inventory_update\compat\CompatibilityBootstrap.java'
 Assert-Contains -Path $versionDifferences -Text 'Minecraft 1.21.1 and earlier versions support EMI integration.' -Label 'EMI version boundary is documented'
 Assert-Contains -Path $versionDifferences -Text 'the 26.3 NeoForge build will add this integration when Sophisticated publishes for 26.3' -Label 'Sophisticated loader/version boundary is documented'
 Assert-Contains -Path $versionDifferences -Text 'single Salt frame' -Label 'Sophisticated single-frame composition is documented'
@@ -769,7 +832,7 @@ Assert-Contains -Path $versionDifferences -Text 'same authenticated detached-con
 Assert-Contains -Path $versionDifferences -Text 'that exact source Backpack is locked for the lifetime of its Salt session' -Label 'Sophisticated item Backpack source lock is documented'
 Assert-Contains -Path $versionDifferences -Text 'exclusive to Forge and NeoForge and does not change Fabric behavior' -Label 'Sophisticated item-source lock loader boundary is documented'
 Assert-Contains -Path $versionDifferences -Text 'physical Sophisticated Storage block remains visibly open' -Label 'Sophisticated detached storage opener lifetime is documented'
-Assert-Contains -Path $emiRuntime -Text 'RecipeBrowserSource.EMI' -Label '1.21.1 shared EMI runtime access retained'
+Assert-Contains -Path $emiRuntime -Text 'RecipeBrowserProviders.EMI' -Label '1.21.1 shared EMI runtime access retained'
 Assert-Contains -Path $emiRuntime -Text 'EmiCraftingRecipe' -Label '1.21.1 EMI crafting transfer support retained'
 Assert-Contains -Path $emiRuntime -Text 'EMI_FAVORITES_CLASS' -Label '1.21.1 EMI favorites support retained'
 Assert-Contains -Path $emiRuntime -Text 'cachedIndexEntriesByType' -Label '1.21.1 EMI index rendering cache retained'
@@ -780,8 +843,8 @@ Assert-Contains -Path $emiRuntime -Text 'renderHoveredSlot' -Label '1.21.1 EMI h
 Assert-Contains -Path $emiRuntime -Text 'renderRecipeTooltip' -Label '1.21.1 EMI recipe widget tooltips retained'
 Assert-Contains -Path $emiRuntime -Text 'JEMI_TAG_RECIPE_HEIGHT = 42' -Label '1.21.1 EMI compacts JEI tag recipes imported through JEMI'
 Assert-Contains -Path $emiRuntime -Text 'compactJemiTagWidgets' -Label '1.21.1 EMI replaces oversized JEMI tag widget bounds'
-Assert-Contains -Path $emiBootstrap -Text 'RecipeBrowserBridge.install(RecipeBrowserSource.EMI, access)' -Label '1.21.1 EMI startup bootstrap retained'
-Assert-Contains -Path $emiClientStartup -Text 'EmiRecipeBrowserBootstrap.initialize();' -Label '1.21.1 client initializes EMI integration'
+Assert-Contains -Path $emiBootstrap -Text 'RecipeBrowserProviders.EMI, access)' -Label '1.21.1 EMI startup bootstrap retained'
+Assert-Contains -Path $emiClientStartup -Text 'com.salts_inventory_update.compat.emi.EmiRecipeBrowserBootstrap' -Label '1.21.1 client initializes EMI integration'
 Assert-Contains -Path $emiFabricPlugin -Text 'implements EmiPlugin' -Label '1.21.1 Fabric EMI client plugin retained'
 Assert-Contains -Path $emiNeoForgePlugin -Text '@EmiEntrypoint' -Label '1.21.1 NeoForge EMI client plugin retained'
 Assert-Contains -Path $emiFabricMetadata -Text '"emi": [' -Label '1.21.1 Fabric EMI entrypoint metadata retained'
@@ -863,7 +926,7 @@ $nonFabricRanges = @{
     '1.21.1' = @{ Loader = 'neoforge'; LanguageRange = '[4.0.34,5)'; ModRange = '[21.1.229,21.2)'; File = 'neoforge.mods.toml' }
     '1.21.11' = @{ Loader = 'neoforge'; LanguageRange = '[10,11)'; ModRange = '[21.11.42,21.12)'; File = 'neoforge.mods.toml' }
     '26.1.2' = @{ Loader = 'neoforge'; LanguageRange = '[11,12)'; ModRange = '[26.1.2.59-beta,26.1.3)'; File = 'neoforge.mods.toml' }
-    '26.2' = @{ Loader = 'neoforge'; LanguageRange = '[11,12)'; ModRange = '[26.2.0.53-beta,26.3)'; File = 'neoforge.mods.toml' }
+    '26.2' = @{ Loader = 'neoforge'; LanguageRange = '[11,12)'; ModRange = '[26.2.0.90,26.3)'; File = 'neoforge.mods.toml' }
     '26.3' = @{ Loader = 'neoforge'; LanguageRange = '[12,13)'; ModRange = '[26.3.0.22-beta,26.4)'; File = 'neoforge.mods.toml' }
 }
 foreach ($version in $versions) {
@@ -931,8 +994,8 @@ foreach ($version in $versions) {
     Assert-Contains -Path $gestureServer -Text 'preparePickupAllCarried(player, sessions,' -Label "$version double-click pickup resolves the authoritative cursor"
     Assert-Matches -Path $gestureServer -Pattern '(?s)private static void clickMenu\(.{0,1000}DesktopMenuBindings\.slot\(menu, slotIndex\) == null' -Label "$version server clicks accept validated logical upgrade slots"
     Assert-Matches -Path $gestureServer -Pattern '(?s)private static ItemStack serverSlotStack\(.{0,250}DesktopMenuBindings\.slot\(menu, slotIndex\)' -Label "$version server slot snapshots include upgrade slots"
-    $leftMouseButton = if ($version -eq '26.3') { 'InputConstants\.MOUSE_BUTTON_LEFT' } else { 'GLFW\.GLFW_MOUSE_BUTTON_LEFT' }
-    Assert-Matches -Path $gestureScreen -Pattern "(?s)if \(vanillaDoubleClick && event\.button\(\) == $leftMouseButton && !isCraftingResultSlot\(hit\)\) \{.{0,1800}this\.dispatchPickupAll\(hit\);" -Label "$version double-click dispatches authenticated cross-window collection"
+    $leftMouseButton = if ($version -eq '26.3') { 'InputConstants\.MOUSE_BUTTON_LEFT' } else { '(?:org\.lwjgl\.glfw\.)?GLFW\.GLFW_MOUSE_BUTTON_LEFT' }
+    Assert-JavaMethodMatches -Path $gestureScreen -SignaturePattern 'private boolean handleSlotMouseClicked\(\s*SlotHit hit,\s*MouseButtonEvent event,\s*boolean doubleClick(?:,\s*@Nullable SlotKey previousClickedSlotKey)?\s*\)' -Pattern "(?s)if \(vanillaDoubleClick && event\.button\(\) == $leftMouseButton && !isCraftingResultSlot\(hit\)\) \{.*this\.dispatchPickupAll\(hit\);" -Label "$version double-click dispatches authenticated cross-window collection"
 }
 
 # Sort-to-open-containers must remain available on every supported version/loader.
@@ -948,7 +1011,7 @@ foreach ($version in $versions) {
     Assert-Contains -Path $sortScreen -Text 'FORCE_SORT_CONTROL_TEXTURE_COLUMN = 11;' -Label "$version Shift sort atlas column"
     Assert-Contains -Path $sortScreen -Text 'CONTROL_TEXTURE_WIDTH = CONTROL_SIZE * 12;' -Label "$version expanded control atlas width"
     Assert-Contains -Path $sortScreen -Text 'this.isShiftHeld() ? FORCE_SORT_CONTROL_TEXTURE_COLUMN : SORT_CONTROL_TEXTURE_COLUMN' -Label "$version live Shift sort icon"
-    Assert-Contains -Path $sortScreen -Text 'window.minimized || window.ghosted || window.persistentHidden' -Label "$version sort excludes unavailable windows"
+    Assert-Contains -Path $sortScreen -Text 'window.persistentHidden' -Label "$version sort excludes unavailable windows"
     Assert-Contains -Path $sortClient -Text 'canSortWindows()' -Label "$version sort capability gate"
     Assert-Contains -Path $sortPackets -Text 'CAP_SORT_WINDOWS = 1L << 5;' -Label "$version sort capability bit"
     Assert-Contains -Path $sortPackets -Text 'record DesktopSortWindowsPayload(' -Label "$version sort request payload"
@@ -972,8 +1035,8 @@ foreach ($version in $versions) {
     }
     if ($version -ne '26.3') {
         $sortLoader = if ($version -eq '1.20.1') { 'forge' } else { 'neoforge' }
-        $sortCompat = Join-Path $RepoRoot "versions\$version\$sortLoader\src\main\java\com\salts_inventory_update\compat\sophisticated\SophisticatedCoreCompat.java"
-        Assert-Contains -Path $sortCompat -Text 'DesktopSortSlots.registerStorage(menuType,' -Label "$version $sortLoader Sophisticated sort storage slots"
+        $sortCompat = Join-Path $RepoRoot "compatibility\versions\$version\$sortLoader\src\main\java\com\salts_inventory_update\compat\sophisticated\SophisticatedCoreCompat.java"
+        Assert-Contains -Path $sortCompat -Text 'DesktopMenuBindings.registerStorage(menuType,' -Label "$version $sortLoader Sophisticated sort storage slots"
     }
 }
 

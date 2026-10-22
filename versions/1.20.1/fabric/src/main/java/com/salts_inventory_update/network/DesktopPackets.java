@@ -35,12 +35,16 @@ public final class DesktopPackets {
     public static final int QUICK_TARGET_DEFAULT = 0;
     public static final int QUICK_TARGET_SESSION = 1;
     public static final int QUICK_TARGET_HOTBAR = 2;
-    public static final int PIN_MODE_UNPINNED = 0;
-    public static final int PIN_MODE_PINNED = 1;
-    public static final int PIN_MODE_GHOST_PINNED = 2;
+    /** Exact built-in player surfaces, distinct from the native/default quick-move behavior. */
+    public static final int QUICK_TARGET_PLAYER_EQUIPMENT = 3;
+    public static final int QUICK_TARGET_PLAYER_STORAGE = 4;
+
+
+
     public static final int MAX_GESTURE_SLOTS = 256;
     public static final long CAP_MULTI_MENU_GESTURES = 1L << 4;
     public static final long CAP_SORT_WINDOWS = 1L << 5;
+    public static final long CAP_CLICK_SEQUENCES = 1L << 6;
 
     private DesktopPackets() {
     }
@@ -266,6 +270,39 @@ public final class DesktopPackets {
         }
     }
 
+    public record DesktopClickAction(DesktopSlotReference slot, int button, boolean quickMove, int targetKind, DesktopSessionReference target) {
+        public DesktopClickAction(DesktopSlotReference slot,int button,boolean quickMove) {this(slot,button,quickMove,-1,null);}
+        public DesktopClickAction { if (button < 0 || button > 1 || targetKind < -1 || targetKind > QUICK_TARGET_PLAYER_STORAGE || (targetKind >= 0) != (target != null) || targetKind >= 0 && !quickMove) throw new IllegalArgumentException("Invalid click button"); }
+    }
+
+    /** A bounded native click sequence, authorized against one starting inventory snapshot. */
+    public record DesktopClickSequencePayload(long sequence, List<DesktopClickAction> actions) implements DesktopPacket {
+        public static final ResourceLocation TYPE = DesktopPackets.id("desktop_click_sequence");
+        public DesktopClickSequencePayload { actions = List.copyOf(actions); if (sequence <= 0 || actions.isEmpty() || actions.size() > MAX_GESTURE_SLOTS) throw new IllegalArgumentException("Invalid click sequence"); }
+        public DesktopClickSequencePayload(FriendlyByteBuf buf) { this(buf.readLong(), readActions(buf)); }
+        private static List<DesktopClickAction> readActions(FriendlyByteBuf buf) {
+            int size = buf.readVarInt(); DesktopProtocol.requireCount("desktop click sequence", size, MAX_GESTURE_SLOTS);
+            List<DesktopClickAction> actions = new ArrayList<>(size);
+            for (int i=0;i<size;i++) {
+                DesktopSlotReference slot=readSlotReference(buf);int button=buf.readVarInt();boolean quick=buf.readBoolean();int kind=buf.readVarInt();
+                actions.add(new DesktopClickAction(slot,button,quick,kind,kind>=0?readSessionReference(buf):null));
+            }
+            return actions;
+        }
+        @Override public ResourceLocation id() { return TYPE; }
+        @Override public void write(FriendlyByteBuf buf) {
+            buf.writeLong(sequence);buf.writeVarInt(actions.size());
+            for (DesktopClickAction action:actions) {writeSlotReference(buf,action.slot());buf.writeVarInt(action.button());buf.writeBoolean(action.quickMove());buf.writeVarInt(action.targetKind());if(action.target()!=null)writeSessionReference(buf,action.target());}
+        }
+    }
+
+    public record DesktopClickSequenceAckPayload(long connectionNonce, long sequence, boolean accepted) implements DesktopPacket {
+        public static final ResourceLocation TYPE = DesktopPackets.id("desktop_click_sequence_ack");
+        public DesktopClickSequenceAckPayload(FriendlyByteBuf buf) { this(buf.readLong(),buf.readLong(),buf.readBoolean()); }
+        @Override public ResourceLocation id() { return TYPE; }
+        @Override public void write(FriendlyByteBuf buf) {buf.writeLong(connectionNonce);buf.writeLong(sequence);buf.writeBoolean(accepted);}
+    }
+
     public record DesktopDragSlotsPayload(int quickCraftType, List<DesktopSlotReference> slots) implements DesktopPacket {
         public static final ResourceLocation TYPE = DesktopPackets.id("desktop_drag_slots");
         public DesktopDragSlotsPayload(FriendlyByteBuf buf) { this(buf.readVarInt(), readSlotReferences(buf)); }
@@ -304,7 +341,7 @@ public final class DesktopPackets {
     public record DesktopQuickMoveAllPayload(List<DesktopSlotReference> sources, int targetKind, DesktopSessionReference target) implements DesktopPacket {
         public static final ResourceLocation TYPE = DesktopPackets.id("desktop_quick_move_all");
         public DesktopQuickMoveAllPayload(FriendlyByteBuf buf) { this(readSlotReferences(buf), buf.readVarInt(), readSessionReference(buf)); }
-        public DesktopQuickMoveAllPayload { if (targetKind < QUICK_TARGET_DEFAULT || targetKind > QUICK_TARGET_HOTBAR || target == null) throw new IllegalArgumentException("Invalid quick move all"); sources = List.copyOf(sources); requireUniqueBounded(sources, MAX_GESTURE_SLOTS, r -> ((long) r.sessionId() << 32) ^ r.slotIndex()); }
+        public DesktopQuickMoveAllPayload { if (targetKind < QUICK_TARGET_DEFAULT || targetKind > QUICK_TARGET_PLAYER_STORAGE || target == null) throw new IllegalArgumentException("Invalid quick move all"); sources = List.copyOf(sources); requireUniqueBounded(sources, MAX_GESTURE_SLOTS, r -> ((long) r.sessionId() << 32) ^ r.slotIndex()); }
         @Override public ResourceLocation id() { return TYPE; }
         @Override public void write(FriendlyByteBuf buf) { writeSlotReferences(buf, sources); buf.writeVarInt(targetKind); writeSessionReference(buf, target); }
     }
@@ -503,6 +540,41 @@ public final class DesktopPackets {
         }
     }
 
+    public static final int RECIPE_HOVER_BEGIN=0, RECIPE_HOVER_UPDATE=1, RECIPE_HOVER_END=2;
+    public record DesktopCraftToWindowPayload(int sourceSessionId,int targetSessionId,ResourceLocation recipeId,boolean stack) implements DesktopPacket {
+        public static final ResourceLocation TYPE=DesktopPackets.id("desktop_craft_to_window");
+        public DesktopCraftToWindowPayload { if(sourceSessionId<0||targetSessionId<0||recipeId==null)throw new IllegalArgumentException("Invalid contextual craft"); }
+        public DesktopCraftToWindowPayload(FriendlyByteBuf buf){this(buf.readVarInt(),buf.readVarInt(),buf.readResourceLocation(),buf.readBoolean());}
+        @Override public ResourceLocation id(){return TYPE;}
+        @Override public void write(FriendlyByteBuf buf){buf.writeVarInt(sourceSessionId);buf.writeVarInt(targetSessionId);buf.writeResourceLocation(recipeId);buf.writeBoolean(stack);}
+    }
+    public record DesktopCookingRecipePayload(int sessionId,ResourceLocation recipeId) implements DesktopPacket {
+        public static final ResourceLocation TYPE=DesktopPackets.id("desktop_cooking_recipe");
+        public DesktopCookingRecipePayload { if(sessionId<=0||recipeId==null)throw new IllegalArgumentException("Invalid contextual cooking"); }
+        public DesktopCookingRecipePayload(FriendlyByteBuf buf){this(buf.readVarInt(),buf.readResourceLocation());}
+        @Override public ResourceLocation id(){return TYPE;}
+        @Override public void write(FriendlyByteBuf buf){buf.writeVarInt(sessionId);buf.writeResourceLocation(recipeId);}
+    }
+    public record DesktopRecipeHoverPayload(int sessionId,long epoch,int action,ResourceLocation recipeId) implements DesktopPacket {
+        public static final ResourceLocation TYPE=DesktopPackets.id("desktop_recipe_hover");
+        public DesktopRecipeHoverPayload { if(sessionId<0||epoch<=0||action<0||action>2)throw new IllegalArgumentException("Invalid contextual preview"); }
+        public DesktopRecipeHoverPayload(FriendlyByteBuf buf){this(buf.readVarInt(),buf.readVarLong(),buf.readVarInt(),buf.readBoolean()?buf.readResourceLocation():null);}
+        @Override public ResourceLocation id(){return TYPE;}
+        @Override public void write(FriendlyByteBuf buf){buf.writeVarInt(sessionId);buf.writeVarLong(epoch);buf.writeVarInt(action);buf.writeBoolean(recipeId!=null);if(recipeId!=null)buf.writeResourceLocation(recipeId);}
+    }
+    public record RecipeHoverGhost(int slotIndex,ItemStack item){
+        public RecipeHoverGhost {if(slotIndex<0||slotIndex>=DesktopProtocol.MAX_OPEN_SESSION_ITEMS||item==null||item.isEmpty())throw new IllegalArgumentException("Invalid hover ghost");item=item.copyWithCount(1);}
+        @Override public ItemStack item(){return item.copy();}
+    }
+    public record DesktopRecipeHoverStatePayload(long connectionNonce,int sessionId,long epoch,boolean active,ResourceLocation recipeId,List<RecipeHoverGhost> ghosts) implements DesktopPacket {
+        public static final ResourceLocation TYPE=DesktopPackets.id("desktop_recipe_hover_state");
+        public DesktopRecipeHoverStatePayload {if(connectionNonce==0||sessionId<0||epoch<=0||ghosts.size()>9)throw new IllegalArgumentException("Invalid hover state");ghosts=List.copyOf(ghosts);}
+        public DesktopRecipeHoverStatePayload(FriendlyByteBuf buf){this(buf.readLong(),buf.readVarInt(),buf.readVarLong(),buf.readBoolean(),buf.readBoolean()?buf.readResourceLocation():null,readGhosts(buf));}
+        private static List<RecipeHoverGhost> readGhosts(FriendlyByteBuf buf){int size=buf.readVarInt();if(size<0||size>9)throw new IllegalArgumentException("Too many ghosts");List<RecipeHoverGhost> ghosts=new ArrayList<>();for(int i=0;i<size;i++)ghosts.add(new RecipeHoverGhost(buf.readVarInt(),buf.readItem()));return ghosts;}
+        @Override public ResourceLocation id(){return TYPE;}
+        @Override public void write(FriendlyByteBuf buf){buf.writeLong(connectionNonce);buf.writeVarInt(sessionId);buf.writeVarLong(epoch);buf.writeBoolean(active);buf.writeBoolean(recipeId!=null);if(recipeId!=null)buf.writeResourceLocation(recipeId);buf.writeVarInt(ghosts.size());for(var ghost:ghosts){buf.writeVarInt(ghost.slotIndex());buf.writeItem(ghost.item());}}
+    }
+
     public record DesktopPlaceRecipePayload(int sessionId, ResourceLocation recipeId, boolean useMaxItems) implements DesktopPacket {
         public static final ResourceLocation TYPE = DesktopPackets.id("desktop_place_recipe");
 
@@ -626,11 +698,11 @@ public final class DesktopPackets {
         }
     }
 
-    public record DesktopSessionPinPayload(int sessionId, int pinMode) implements DesktopPacket {
-        public static final ResourceLocation TYPE = DesktopPackets.id("desktop_session_pin");
+    public record DesktopFinishWorkspacePayload(int sessionId) implements DesktopPacket {
+        public static final ResourceLocation TYPE = DesktopPackets.id("desktop_finish_workspace");
 
-        public DesktopSessionPinPayload(FriendlyByteBuf buf) {
-            this(buf.readVarInt(), buf.readVarInt());
+        public DesktopFinishWorkspacePayload(FriendlyByteBuf buf) {
+            this(buf.readVarInt());
         }
 
         @Override
@@ -641,9 +713,10 @@ public final class DesktopPackets {
         @Override
         public void write(FriendlyByteBuf buf) {
             buf.writeVarInt(this.sessionId);
-            buf.writeVarInt(this.pinMode);
         }
     }
+
+
 
     public record DesktopSessionVisibilityPayload(int sessionId, boolean visible) implements DesktopPacket {
         public static final ResourceLocation TYPE = DesktopPackets.id("desktop_session_visibility");

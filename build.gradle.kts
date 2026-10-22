@@ -5,6 +5,7 @@ import org.gradle.api.attributes.Attribute
 import org.gradle.api.attributes.Usage
 import org.gradle.api.file.DuplicatesStrategy
 import org.gradle.api.tasks.bundling.Jar
+import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.SourceSetContainer
 import org.gradle.api.tasks.JavaExec
@@ -15,13 +16,37 @@ import org.gradle.api.tasks.testing.Test
 import org.gradle.language.jvm.tasks.ProcessResources
 import java.security.MessageDigest
 import java.util.zip.ZipFile
+import groovy.json.JsonSlurper
 
 plugins {
     id("dev.prism")
 }
 
 group = "com.salts_inventory_update"
-version = "0.1.4"
+version = "0.1.5"
+
+// A Minecraft-specific hotfix does not advance the other Core release targets.
+val coreVersionOverrides = mapOf("1.20.1" to providers.gradleProperty("coreVersion1_20_1").get())
+fun coreVersionFor(minecraftVersion: String): String =
+    coreVersionOverrides[minecraftVersion] ?: rootProject.version.toString()
+
+// QA snapshots can require a newer installed loader/API than the release compile baseline.
+// Ordinary builds do not read or apply any runtime override.
+@Suppress("UNCHECKED_CAST")
+val compatibilityQaManifest = providers.gradleProperty("compatibilityQaManifest").orNull?.let {
+    JsonSlurper().parse(file(it)) as Map<String, Any>
+}
+fun qaRuntimeVersion(minecraft: String, dependency: String, baseline: String): String {
+    val snapshot = compatibilityQaManifest ?: return baseline
+    if (snapshot["minecraft"] != minecraft) return baseline
+    val runtime = snapshot["runtime"] as? Map<*, *> ?: return baseline
+    return runtime[dependency] as? String ?: baseline
+}
+
+@Suppress("UNCHECKED_CAST")
+val controlifyTargetPins = (JsonSlurper().parse(rootProject.file("controlify/targets.json")) as Map<*, *>)
+    .get("targets") as List<Map<String, Any>>
+
 
 val modMenuVersions = mapOf(
     "1.20.1" to "7.2.2",
@@ -57,6 +82,7 @@ val includeSophisticatedRuntime = providers.gradleProperty("includeSophisticated
 val nonFabricSharedSourceExcludes = listOf(
     "**/SaltsInventoryUpdateFabric.java",
     "**/SaltsInventoryUpdateFabricClient.java",
+    "**/FabricHotbarDecorationsMixin.java",
     "**/compat/rei/SaltsReiClientPlugin.java",
     "**/compat/emi/SaltsEmiClientPlugin.java"
 )
@@ -93,7 +119,7 @@ fun SourceSet.addFunctionalTestSourceDir() {
 }
 
 fun SourceSet.addFabricModMenuSourceDir() {
-    val sourceDir = rootProject.file("versions/fabric-modmenu/src/main/java")
+    val sourceDir = rootProject.file("compatibility/fabric-modmenu/src/main/java")
     val currentDirs = java.srcDirs.map { it.canonicalFile }.toMutableSet()
     if (currentDirs.add(sourceDir.canonicalFile)) {
         java.srcDir(sourceDir)
@@ -110,9 +136,10 @@ fun SourceSet.addFabricPlatformSourceDir(minecraftVersion: String) {
 
 prism {
     metadata {
+        expand("legacy_core_version", coreVersionFor("1.20.1"))
         modId = "salts_inventory_update"
         name = "Salt's Inventory Update"
-        description = "Salt's Inventory Update upgrades Minecraft inventories with expandable player storage and desktop-style movable container windows. Move, pin, ghost-pin, resize, and snap supported inventory screens, and optionally browse supported recipe browsers in a Salt desktop window with ingredient search, recipe and uses views, bookmarks, history, and Move Items transfers where available. Tune the experience with /saltsinventory config or the mod-list config button. API hooks are available for add-ons and supported screens.\\n\\nDiscord: https://discord.gg/kfdE9gGGxP\\nAPI: https://salt-and-fries.github.io/Salt-s-Inventory-Update/\\nSource: https://github.com/Salt-and-Fries/Salt-s-Inventory-Update\\nDonate: https://www.paypal.com/donate/?business=ERE5F32WV4NWN&no_recurring=1&currency_code=USD"
+        description = "Salt's Inventory Update upgrades Minecraft inventories with expandable player storage and desktop-style movable container windows. Move, pin, resize, and snap supported inventory screens, and optionally browse supported recipe browsers in a Salt desktop window with ingredient search, recipe and uses views, bookmarks, history, and Move Items transfers where available. Tune the experience with /saltsinventory config or the mod-list config button. API hooks are available for add-ons and supported screens.\\n\\nDiscord: https://discord.gg/kfdE9gGGxP\\nAPI: https://salt-and-fries.github.io/Salt-s-Inventory-Update/\\nSource: https://github.com/Salt-and-Fries/Salt-s-Inventory-Update\\nDonate: https://www.paypal.com/donate/?business=ERE5F32WV4NWN&no_recurring=1&currency_code=USD"
         license = "MIT"
     }
 
@@ -146,71 +173,290 @@ prism {
 
     version("26.1.2") {
         fabric {
-            loaderVersion = "0.19.2"
-            fabricApi("0.149.0+26.1.2")
+            loaderVersion = qaRuntimeVersion("26.1.2", "fabric_loader", "0.19.2")
+            fabricApi(qaRuntimeVersion("26.1.2", "fabric_api", "0.149.0+26.1.2"))
         }
         neoforge {
-            loaderVersion = "26.1.2.59-beta"
+            loaderVersion = qaRuntimeVersion("26.1.2", "neoforge", "26.1.2.59-beta")
         }
     }
 
     version("26.2") {
         fabric {
-            loaderVersion = "0.19.3"
-            fabricApi("0.153.0+26.2")
+            loaderVersion = qaRuntimeVersion("26.2", "fabric_loader", "0.19.3")
+            fabricApi(qaRuntimeVersion("26.2", "fabric_api", "0.153.0+26.2"))
         }
         neoforge {
-            loaderVersion = "26.2.0.53-beta"
+            loaderVersion = qaRuntimeVersion("26.2", "neoforge", "26.2.0.90")
         }
     }
 
     version("26.3") {
         neoFormVersion = "26.3-1"
         fabric {
-            loaderVersion = "0.19.5"
-            fabricApi("0.161.0+26.3")
+            loaderVersion = qaRuntimeVersion("26.3", "fabric_loader", "0.19.5")
+            fabricApi(qaRuntimeVersion("26.3", "fabric_api", "0.161.0+26.3"))
         }
         neoforge {
-            loaderVersion = "26.3.0.22-beta"
+            loaderVersion = qaRuntimeVersion("26.3", "neoforge", "26.3.0.76")
         }
     }
 
     version("1.21.11") {
         fabric {
-            loaderVersion = "0.19.2"
-            fabricApi("0.141.4+1.21.11")
+            loaderVersion = qaRuntimeVersion("1.21.11", "fabric_loader", "0.19.2")
+            fabricApi(qaRuntimeVersion("1.21.11", "fabric_api", "0.141.4+1.21.11"))
         }
         neoforge {
-            loaderVersion = "21.11.42"
+            loaderVersion = qaRuntimeVersion("1.21.11", "neoforge", "21.11.42")
         }
     }
 
     version("1.21.1") {
         fabric {
-            loaderVersion = "0.16.10"
-            fabricApi("0.116.1+1.21.1")
+            loaderVersion = qaRuntimeVersion("1.21.1", "fabric_loader", "0.16.10")
+            fabricApi(qaRuntimeVersion("1.21.1", "fabric_api", "0.116.1+1.21.1"))
         }
         neoforge {
-            loaderVersion = "21.1.229"
+            loaderVersion = qaRuntimeVersion("1.21.1", "neoforge", "21.1.229")
         }
     }
 
     version("1.20.1") {
         fabric {
-            loaderVersion = "0.16.10"
-            fabricApi("0.92.6+1.20.1")
+            loaderVersion = qaRuntimeVersion("1.20.1", "fabric_loader", "0.16.10")
+            fabricApi(qaRuntimeVersion("1.20.1", "fabric_api", "0.92.6+1.20.1"))
         }
         forge {
             loaderVersion = "47.4.0"
         }
     }
+    mod("controlify") {
+        version = providers.gradleProperty("controlifyVersion").get()
+        metadata {
+            // Companions have their own release label and target-specific Core dependency.
+            expand("core_version", rootProject.version.toString())
+            expand("legacy_core_version", coreVersionFor("1.20.1"))
+            modId = "salts_inventory_controlify"
+            name = "Salt's Inventory Controlify"
+            description = "Controller radial inventory workspace for Salt's Inventory Update. Requires the matching core mod and Controlify."
+            license = "MIT"
+        }
+        version("1.20.1") {
+            fabric {
+                loaderVersion = "0.18.2"
+                fabricApi("0.92.6+1.20.1")
+            }
+            forge {
+                loaderVersion = "47.4.0"
+            }
+        }
+        version("1.21.1") {
+            fabric {
+                loaderVersion = "0.18.2"
+                fabricApi("0.116.1+1.21.1")
+            }
+            neoforge {
+                loaderVersion = "21.1.229"
+            }
+        }
+        version("1.21.11") {
+            fabric {
+                loaderVersion = "0.19.2"
+                fabricApi("0.141.4+1.21.11")
+            }
+            neoforge { loaderVersion = "21.11.42" }
+        }
+        version("26.1.2") {
+            fabric {
+                loaderVersion = "0.19.5"
+                fabricApi("0.149.0+26.1.2")
+            }
+            neoforge { loaderVersion = "26.1.2.59-beta" }
+        }
+        version("26.2") {
+            fabric {
+                loaderVersion = "0.19.5"
+                fabricApi("0.153.0+26.2")
+            }
+            neoforge { loaderVersion = "26.2.0.90" }
+        }
+        version("26.3") {
+            neoFormVersion = "26.3-1"
+            fabric {
+                loaderVersion = "0.19.5"
+                fabricApi("0.161.0+26.3")
+            }
+            neoforge { loaderVersion = "26.3.0.76" }
+        }
+    }
+    mod("compatibility") {
+        version = providers.gradleProperty("compatibilityVersion").get()
+        metadata {
+            // Legacy targets require their specific Core hotfix, independently of this mod's version.
+            expand("core_version", rootProject.version.toString())
+            expand("legacy_core_version", coreVersionFor("1.20.1"))
+            modId = "salts_inventory_compat"
+            name = "Salt's Inventory Compatibility"
+            description = "Optional third-party inventory and recipe-browser integrations for Salt's Inventory Update. Requires the matching core mod."
+            license = "MIT AND LGPL-3.0-or-later"
+        }
+        version("26.1.2") {
+            fabric {
+                loaderVersion = qaRuntimeVersion("26.1.2", "fabric_loader", "0.19.2")
+                fabricApi(qaRuntimeVersion("26.1.2", "fabric_api", "0.149.0+26.1.2"))
+            }
+            neoforge {
+                loaderVersion = qaRuntimeVersion("26.1.2", "neoforge", "26.1.2.59-beta")
+            }
+        }
+
+        version("26.2") {
+            fabric {
+                loaderVersion = qaRuntimeVersion("26.2", "fabric_loader", "0.19.3")
+                fabricApi(qaRuntimeVersion("26.2", "fabric_api", "0.153.0+26.2"))
+            }
+            neoforge {
+                loaderVersion = qaRuntimeVersion("26.2", "neoforge", "26.2.0.90")
+            }
+        }
+
+        version("26.3") {
+            neoFormVersion = "26.3-1"
+            fabric {
+                loaderVersion = qaRuntimeVersion("26.3", "fabric_loader", "0.19.5")
+                fabricApi(qaRuntimeVersion("26.3", "fabric_api", "0.161.0+26.3"))
+            }
+            neoforge {
+                loaderVersion = qaRuntimeVersion("26.3", "neoforge", "26.3.0.76")
+            }
+        }
+
+        version("1.21.11") {
+            fabric {
+                loaderVersion = qaRuntimeVersion("1.21.11", "fabric_loader", "0.19.2")
+                fabricApi(qaRuntimeVersion("1.21.11", "fabric_api", "0.141.4+1.21.11"))
+            }
+            neoforge {
+                loaderVersion = qaRuntimeVersion("1.21.11", "neoforge", "21.11.42")
+            }
+        }
+
+        version("1.21.1") {
+            fabric {
+                loaderVersion = qaRuntimeVersion("1.21.1", "fabric_loader", "0.16.10")
+                fabricApi(qaRuntimeVersion("1.21.1", "fabric_api", "0.116.1+1.21.1"))
+            }
+            neoforge {
+                loaderVersion = qaRuntimeVersion("1.21.1", "neoforge", "21.1.229")
+            }
+        }
+
+        version("1.20.1") {
+            fabric {
+                loaderVersion = qaRuntimeVersion("1.20.1", "fabric_loader", "0.16.10")
+                fabricApi(qaRuntimeVersion("1.20.1", "fabric_api", "0.92.6+1.20.1"))
+            }
+            forge {
+                loaderVersion = "47.4.0"
+            }
+        }
+    }
+
 }
 
 subprojects {
     val minecraftVersion = parent?.name
+    val compatibilityModule = path.startsWith(":compatibility:")
+    val controlifyModule = path.startsWith(":controlify:")
+    val coreModule = !compatibilityModule && !controlifyModule
+
+    if (compatibilityModule && minecraftVersion != null && name in setOf("fabric", "forge", "neoforge")) {
+        @Suppress("UNCHECKED_CAST")
+        val targets = (JsonSlurper().parse(rootProject.file("gradle/raised-targets.json")) as Map<*, *>)["targets"] as List<Map<String, Any>>
+        val raised = targets.single { it["minecraft"] == minecraftVersion && it["loader"] == name }
+        afterEvaluate {
+            val mappedFabric = name == "fabric" && !minecraftVersion.startsWith("26.")
+            dependencies.add(if (mappedFabric) "modCompileOnly" else "compileOnly", raised["coordinate"] as String)
+            extensions.getByType<SourceSetContainer>().named("main") {
+                java.srcDir(rootProject.file("compatibility/raised/src/main/java"))
+            }
+            if (providers.gradleProperty("includeRaisedRuntime").map { it.toBoolean() }.getOrElse(false)) {
+                dependencies.add(if (mappedFabric) "modLocalRuntime" else "runtimeOnly", raised["coordinate"] as String)
+            }
+        }
+    }
+
+    if (coreModule && minecraftVersion != null && name in setOf("fabric", "forge", "neoforge")) {
+        @Suppress("UNCHECKED_CAST")
+        val targets = (JsonSlurper().parse(rootProject.file("gradle/mouse-tweaks-targets.json")) as Map<*, *>)["targets"] as List<Map<String, Any>>
+        val mouseTweaks = targets.single { it["minecraft"] == minecraftVersion && it["loader"] == name }
+        afterEvaluate {
+            val configurationName = if (name == "fabric" && !minecraftVersion.startsWith("26.")) "modCompileOnly" else "compileOnly"
+            dependencies.add(configurationName, mouseTweaks["coordinate"] as String)
+        }
+    }
+
+    if (coreModule && minecraftVersion in coreVersionOverrides && name in setOf("common", "fabric", "forge", "neoforge")) {
+        afterEvaluate {
+            version = coreVersionFor(minecraftVersion!!)
+            tasks.withType<AbstractArchiveTask>().configureEach {
+                archiveVersion.set(project.version.toString())
+            }
+        }
+    }
+
+    if (controlifyModule && minecraftVersion != null && name in setOf("fabric", "forge", "neoforge")) {
+        val fabricTarget = name == "fabric"
+        val mappedFabric = fabricTarget && !minecraftVersion.startsWith("26.")
+        val pin = controlifyTargetPins.single {
+            it["minecraft"] == minecraftVersion && it["loader"] == name
+        }
+        fun coordinate(kind: String): String {
+            val dependency = pin.getValue(kind) as Map<*, *>
+            return "maven.modrinth:${dependency["project"]}:${dependency["version_id"]}"
+        }
+        if (name == "forge") {
+            repositories.maven {
+                name = "ControlifyForgeRuntime"
+                url = uri("https://www.cursemaven.com")
+                content { includeModule("curse.maven", "mixin-args-1257105") }
+            }
+        }
+        afterEvaluate {
+            dependencies.add(if (mappedFabric || name == "forge") "modImplementation" else "implementation", coordinate("controller"))
+            dependencies.add(if (mappedFabric || name == "forge") "modRuntimeOnly" else "runtimeOnly", coordinate("yacl"))
+            @Suppress("UNCHECKED_CAST")
+            val runtimeDependencies = pin["runtime_dependencies"] as? List<Map<String, Any?>> ?: emptyList()
+            runtimeDependencies.forEach { dependencies.add("runtimeOnly", it.getValue("coordinate") as String) }
+        }
+    }
+
+    if (compatibilityModule && minecraftVersion == "1.20.1" && name == "forge") {
+        afterEvaluate {
+            @Suppress("UNCHECKED_CAST")
+            val mappingsType = Class.forName("net.neoforged.moddevgradle.legacyforge.internal.MinecraftMappings") as Class<Named>
+            val mappingsAttribute = Attribute.of("net.neoforged.moddevgradle.legacy.minecraft_mappings.v2", mappingsType)
+            val nativeAe2 = configurations.maybeCreate("ae2NativeNamed").apply {
+                isCanBeConsumed = false
+                isCanBeResolved = true
+                attributes {
+                    attribute(mappingsAttribute, objects.named(mappingsType, "named"))
+                    attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                    attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+                }
+            }
+            dependencies.add(nativeAe2.name, "maven.modrinth:ae2:jYgSnxye")
+            dependencies.add("compileOnly", files(nativeAe2))
+            if (providers.gradleProperty("includeAe2Runtime").map(String::toBoolean).getOrElse(false)) {
+                dependencies.add("runtimeOnly", files(nativeAe2))
+                dependencies.add("modRuntimeOnly", "maven.modrinth:guideme:20.1.7")
+            }
+        }
+    }
 
     plugins.withId("java") {
-        if (name in setOf("fabric", "forge", "neoforge")) {
+        if (coreModule && name in setOf("fabric", "forge", "neoforge")) {
             tasks.withType<ProcessResources>().configureEach {
                 from(rootProject.file("artwork/shared-resources"))
             }
@@ -262,6 +508,7 @@ subprojects {
     }
 
     val sophisticatedVersions = mapOf(
+        "26.3" to listOf("maven.modrinth:nmoqTijg:LUel1F77", "maven.modrinth:TyCTlI4b:wfDx3oyJ", "maven.modrinth:hMlaZH8f:vbyKOzIR"),
         "1.20.1" to listOf(
             "maven.modrinth:nmoqTijg:JGT2DD0v", // Sophisticated Core 1.20.1-1.3.84.2308
             "maven.modrinth:TyCTlI4b:as0tf712", // Sophisticated Backpacks 1.20.1-3.24.67.2109
@@ -288,7 +535,7 @@ subprojects {
             "maven.modrinth:hMlaZH8f:F4SdMde3"  // Sophisticated Storage 26.2-1.5.108.2088
         )
     )
-    if (minecraftVersion != null && name in setOf("forge", "neoforge")) {
+    if (compatibilityModule && minecraftVersion != null && name in setOf("forge", "neoforge")) {
         afterEvaluate {
             val dependenciesForVersion = sophisticatedVersions[minecraftVersion].orEmpty()
             dependenciesForVersion.forEach { dependency ->
@@ -367,10 +614,32 @@ subprojects {
                 if (mainSourceSet != null && mixinExtension != null) {
                     mixinExtension.javaClass
                         .getMethod("config", String::class.java)
-                        .invoke(mixinExtension, "salts_inventory_update.mixins.json")
+                        .invoke(mixinExtension, when {
+                            compatibilityModule -> "salts_inventory_compat.sophisticated.mixins.json"
+                            controlifyModule -> "salts_inventory_controlify.mixins.json"
+                            else -> "salts_inventory_update.mixins.json"
+                        })
+                    if (compatibilityModule) {
+                        mixinExtension.javaClass.getMethod("config", String::class.java)
+                            .invoke(mixinExtension, "salts_inventory_compat.ae2.mixins.json")
+                        mixinExtension.javaClass.getMethod("config", String::class.java)
+                            .invoke(mixinExtension, "salts_inventory_compat.ae2-native.mixins.json")
+                        // Source-set development mods do not have the core JAR manifest.
+                        // Forge therefore needs both independent mods' mixin configs here.
+                        mixinExtension.javaClass.getMethod("config", String::class.java)
+                            .invoke(mixinExtension, "salts_inventory_update.mixins.json")
+                    }
+                    if (controlifyModule) {
+                        mixinExtension.javaClass.getMethod("config", String::class.java)
+                            .invoke(mixinExtension, "salts_inventory_update.mixins.json")
+                    }
                     mixinExtension.javaClass
                         .getMethod("add", SourceSet::class.java, String::class.java)
-                        .invoke(mixinExtension, mainSourceSet, "salts_inventory_update.refmap.json")
+                        .invoke(mixinExtension, mainSourceSet, when {
+                            compatibilityModule -> "salts_inventory_compat.refmap.json"
+                            controlifyModule -> "salts_inventory_controlify.refmap.json"
+                            else -> "salts_inventory_update.refmap.json"
+                        })
                     logger.lifecycle("Salt's Inventory Update Forge 1.20.1 mixin refmap generation enabled")
                 } else {
                     logger.warn("Salt's Inventory Update Forge 1.20.1 mixin refmap generation could not be enabled")
@@ -380,7 +649,11 @@ subprojects {
         plugins.withId("java") {
             tasks.named<Jar>("jar") {
                 manifest {
-                    attributes("MixinConfigs" to "salts_inventory_update.mixins.json")
+                    attributes("MixinConfigs" to when {
+                        compatibilityModule -> "salts_inventory_compat.sophisticated.mixins.json,salts_inventory_compat.ae2.mixins.json,salts_inventory_compat.ae2-native.mixins.json"
+                        controlifyModule -> "salts_inventory_controlify.mixins.json"
+                        else -> "salts_inventory_update.mixins.json"
+                    })
                 }
             }
         }
@@ -389,13 +662,22 @@ subprojects {
     if (minecraftVersion != null && name == "fabric") {
         afterEvaluate {
             extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addFabricModMenuSourceDir()
-                addFabricPlatformSourceDir(minecraftVersion)
+                if (compatibilityModule) addFabricModMenuSourceDir()
+                else if (coreModule) addFabricPlatformSourceDir(minecraftVersion)
             }
-            modMenuVersions[minecraftVersion]?.let { modMenuVersion ->
+            if (compatibilityModule) modMenuVersions[minecraftVersion]?.let { modMenuVersion ->
                 val configurationName = if (minecraftVersion.startsWith("26.")) "compileOnly" else "modCompileOnly"
                 if (configurations.findByName(configurationName) != null) {
                     dependencies.add(configurationName, "com.terraformersmc:modmenu:$modMenuVersion")
+                }
+            }
+            if (compatibilityModule && minecraftVersion == "1.20.1") {
+                dependencies.add("modCompileOnly", "maven.modrinth:ae2:xIOhOI9C")
+                if (providers.gradleProperty("includeAe2Runtime").map(String::toBoolean).getOrElse(false)) {
+                    dependencies.add("modLocalRuntime", "maven.modrinth:ae2:xIOhOI9C")
+                    // Loom's development launcher does not load AE2's nested
+                    // Energy JAR. Use the same upstream dependency for QA only.
+                    dependencies.add("modLocalRuntime", "teamreborn:energy:3.0.0")
                 }
             }
         }
@@ -415,7 +697,7 @@ subprojects {
         "1.21.11" to "27.13.0.43",
         "1.21.1" to "19.32.0.359"
     )
-    if (minecraftVersion != null && (name == "fabric" || name == "neoforge" || name == "forge")) {
+    if (compatibilityModule && minecraftVersion != null && (name == "fabric" || name == "neoforge" || name == "forge")) {
         afterEvaluate {
             val jeiVersion = if (name == "neoforge") {
                 neoForgeJeiVersions[minecraftVersion] ?: jeiVersions[minecraftVersion]
@@ -468,6 +750,7 @@ subprojects {
     }
 
     val reiVersions = mapOf(
+        "26.3" to "26.3.824",
         "26.2" to "26.2.820",
         "26.1.2" to "26.1.818",
         "1.21.11" to "21.11.816",
@@ -475,6 +758,7 @@ subprojects {
         "1.20.1" to "12.1.785"
     )
     val reiBasicMathVersions = mapOf(
+        "26.3" to "0.6.1",
         "26.2" to "0.6.1",
         "26.1.2" to "0.6.1",
         "1.21.11" to "0.6.1",
@@ -482,6 +766,7 @@ subprojects {
         "1.20.1" to "0.6.1"
     )
     val reiClothConfigVersions = mapOf(
+        "26.3" to "26.3.159",
         "26.2" to "26.2.155",
         "26.1.2" to "26.1.154",
         "1.21.11" to "21.11.151",
@@ -489,13 +774,14 @@ subprojects {
         "1.20.1" to "11.0.99"
     )
     val reiArchitecturyVersions = mapOf(
+        "26.3" to "22.0.5",
         "26.2" to "21.0.2",
         "26.1.2" to "20.0.6",
         "1.21.11" to "19.0.1",
         "1.21.1" to "13.0.6",
         "1.20.1" to "9.0.7"
     )
-    if (minecraftVersion != null && (name == "fabric" || name == "neoforge" || name == "forge")) {
+    if (compatibilityModule && minecraftVersion != null && (name == "fabric" || name == "neoforge" || name == "forge")) {
         afterEvaluate {
             reiVersions[minecraftVersion]?.let { reiVersion ->
                 val reiLoader = name
@@ -528,9 +814,10 @@ subprojects {
     }
 
     val emiVersions = mapOf(
+        "1.20.1" to "1.1.24+1.20.1",
         "1.21.1" to "1.1.24+1.21.1"
     )
-    if (minecraftVersion != null && (name == "fabric" || name == "neoforge")) {
+    if (compatibilityModule && minecraftVersion != null && name in setOf("fabric", "forge", "neoforge")) {
         afterEvaluate {
             emiVersions[minecraftVersion]?.let { emiVersion ->
                 val apiConfiguration = if (name == "fabric" && configurations.findByName("modCompileOnly") != null) {
@@ -540,12 +827,25 @@ subprojects {
                 }
                 dependencies.add(apiConfiguration, "dev.emi:emi-$name:$emiVersion:api")
                 if (includeEmiRuntime.get()) {
-                    val runtimeConfiguration = if (name == "fabric" && configurations.findByName("modRuntimeOnly") != null) {
-                        "modRuntimeOnly"
+                    if (name == "forge") {
+                        @Suppress("UNCHECKED_CAST")
+                        val mappingsType = Class.forName("net.neoforged.moddevgradle.legacyforge.internal.MinecraftMappings") as Class<Named>
+                        val mappingsAttribute = Attribute.of("net.neoforged.moddevgradle.legacy.minecraft_mappings.v2", mappingsType)
+                        val emiForgeRuntimeNamed = configurations.maybeCreate("emiForgeRuntimeNamed").apply {
+                            isCanBeConsumed = false
+                            isCanBeResolved = true
+                            attributes {
+                                attribute(mappingsAttribute, objects.named(mappingsType, "named"))
+                                attribute(ArtifactTypeDefinition.ARTIFACT_TYPE_ATTRIBUTE, ArtifactTypeDefinition.JAR_TYPE)
+                                attribute(Usage.USAGE_ATTRIBUTE, objects.named(Usage::class.java, Usage.JAVA_RUNTIME))
+                            }
+                        }
+                        dependencies.add(emiForgeRuntimeNamed.name, "dev.emi:emi-forge:$emiVersion")
+                        tasks.named<JavaExec>("runClient") { classpath += files(emiForgeRuntimeNamed) }
                     } else {
-                        "runtimeOnly"
+                        val runtimeConfiguration = if (configurations.findByName("modRuntimeOnly") != null) "modRuntimeOnly" else "runtimeOnly"
+                        dependencies.add(runtimeConfiguration, "dev.emi:emi-$name:$emiVersion")
                     }
-                    dependencies.add(runtimeConfiguration, "dev.emi:emi-$name:$emiVersion")
                 }
             }
         }
@@ -555,12 +855,16 @@ subprojects {
         val loaderName = name
         afterEvaluate {
             extensions.findByType(SourceSetContainer::class.java)?.named("main") {
-                addLoaderSourceDirs(minecraftVersion, loaderName)
+                if (compatibilityModule) {
+                    java.srcDir(rootProject.file("compatibility/versions/$minecraftVersion/fabric/src/main/java"))
+                    java.exclude("**/SaltsInventoryCompatibilityFabric.java", "**/SaltsInventoryCompatibilityFabricClient.java",
+                        "**/compat/rei/SaltsReiClientPlugin.java", "**/compat/emi/SaltsEmiClientPlugin.java")
+                } else if (coreModule) addLoaderSourceDirs(minecraftVersion, loaderName)
             }
         }
     }
 
-    if (minecraftVersion != null && (name == "fabric" || name == "forge" || name == "neoforge") && includeFunctionalTests.get()) {
+    if (coreModule && minecraftVersion != null && (name == "fabric" || name == "forge" || name == "neoforge") && includeFunctionalTests.get()) {
         afterEvaluate {
             extensions.findByType(SourceSetContainer::class.java)?.named("main") {
                 addFunctionalTestSourceDir()
@@ -571,14 +875,16 @@ subprojects {
 
 gradle.projectsEvaluated {
     val exampleCompiles = subprojects
-        .filter { it.parent?.name != null && it.name in setOf("fabric", "forge", "neoforge") }
+        .filter { !it.path.startsWith(":compatibility:") && !it.path.startsWith(":controlify:") && it.parent?.name != null && it.name in setOf("fabric", "forge", "neoforge") }
         .map { loaderProject ->
             val gameVersion = loaderProject.parent!!.name
             val legacyInput = gameVersion in setOf("1.20.1", "1.21.1")
             val legacyGraphics = legacyInput || gameVersion == "1.21.11"
             val generated = loaderProject.layout.buildDirectory.dir("generated/api-examples")
             val prepare = loaderProject.tasks.register<Sync>("prepareApiExamples") {
+                inputs.property("legacyEventPackage", "com.salts_inventory_update.api.client.input")
                 from(rootProject.file("api-examples/ui/src/main/java"))
+                from(rootProject.file("api-examples/hud/src/main/java"))
                 into(generated)
                 filter { line: String ->
                     var adapted = line
@@ -586,7 +892,7 @@ gradle.projectsEvaluated {
                     if (gameVersion == "1.20.1") adapted = adapted.replace("ResourceLocation.parse(", "ResourceLocation.tryParse(")
                     if (legacyGraphics) adapted = adapted.replace(".extractRenderState(", ".render(")
                     if (legacyInput) {
-                        adapted = adapted.replace("net.minecraft.client.input.", "com.salts_inventory_update.client.input.")
+                        adapted = adapted.replace("net.minecraft.client.input.", "com.salts_inventory_update.api.client.input.")
                             .replace("edit.mouseClicked(event, doubleClick)", "edit.mouseClicked(event.x(), event.y(), event.button())")
                             .replace("edit.mouseDragged(event, dx, dy)", "edit.mouseDragged(event.x(), event.y(), event.button(), dx, dy)")
                             .replace("edit.keyPressed(event)", "edit.keyPressed(event.key(), event.scancode(), event.modifiers())")
@@ -632,9 +938,9 @@ gradle.projectsEvaluated {
     }
     companionDemoProject.tasks.register<Jar>("companionDemoJar") {
         group = "verification"
-        description = "Packages the standalone API5 inventory companion demonstration for NeoForge 26.3."
+        description = "Packages the standalone API6 inventory companion demonstration for NeoForge 26.3."
         dependsOn(compileCompanionDemo)
-        archiveFileName.set("companion-example-26.3-NeoForge-api5.jar")
+        archiveFileName.set("companion-example-26.3-NeoForge-api6.jar")
         destinationDirectory.set(rootProject.layout.buildDirectory.dir("api-examples"))
         from(companionDemoClasses)
         from(companionDemoProject.layout.buildDirectory.dir("classes/api-examples")) {
@@ -652,12 +958,12 @@ gradle.projectsEvaluated {
             }
         }
         dependsOn(subprojects
-            .filter { it.parent?.name != null && (it.name == "fabric" || it.name == "forge" || it.name == "neoforge") }
+            .filter { !it.path.startsWith(":compatibility:") && !it.path.startsWith(":controlify:") && it.parent?.name != null && (it.name == "fabric" || it.name == "forge" || it.name == "neoforge") }
             .map { it.tasks.named("compileJava") })
     }
 
     val uploadableLoaderProjects = subprojects
-        .filter { it.parent?.name != null && it.name in setOf("fabric", "forge", "neoforge") }
+        .filter { !it.path.startsWith(":compatibility:") && !it.path.startsWith(":controlify:") && it.parent?.name != null && it.name in setOf("fabric", "forge", "neoforge") }
     val allProjectBuildTasks = subprojects.mapNotNull { subproject ->
         subproject.tasks.findByName("build")?.let { subproject.tasks.named("build") }
     }
@@ -675,7 +981,7 @@ gradle.projectsEvaluated {
 
         uploadableLoaderProjects.forEach { loaderProject ->
             from(loaderProject.layout.buildDirectory.dir("libs")) {
-                include("*-$modVersion.jar")
+                include("*-${loaderProject.version}.jar")
             }
         }
 
@@ -715,7 +1021,7 @@ gradle.projectsEvaluated {
             nonFabricProjects.forEach { loaderProject ->
                 val jars = loaderProject.layout.buildDirectory.dir("libs").get().asFileTree
                     .matching {
-                        include("*-$modVersion.jar")
+                        include("*-${loaderProject.version}.jar")
                         exclude("*-sources.jar")
                     }
                     .files
@@ -761,7 +1067,7 @@ gradle.projectsEvaluated {
                 "1.21.1" to mapOf("fabric" to null, "neoforge" to "[21.1.229,21.2)"),
                 "1.21.11" to mapOf("fabric" to null, "neoforge" to "[21.11.42,21.12)"),
                 "26.1.2" to mapOf("fabric" to null, "neoforge" to "[26.1.2.59-beta,26.1.3)"),
-                "26.2" to mapOf("fabric" to null, "neoforge" to "[26.2.0.53-beta,26.3)"),
+                "26.2" to mapOf("fabric" to null, "neoforge" to "[26.2.0.90,26.3)"),
                 "26.3" to mapOf("fabric" to null, "neoforge" to "[26.3.0.22-beta,26.4)")
             )
             val languageLoaderRanges = mapOf(
@@ -815,16 +1121,17 @@ gradle.projectsEvaluated {
             )
 
             expectedLoaders.forEach { (minecraftVersion, loaders) ->
+                val targetModVersion = coreVersionFor(minecraftVersion)
                 loaders.forEach { (loader, loaderRange) ->
                     val matches = jars.filter { jar ->
                         val name = jar.name.lowercase()
                         name.contains("-$minecraftVersion-") &&
                             name.contains("-${loader.lowercase()}-") &&
-                            name.endsWith("-$modVersion.jar")
+                            name.endsWith("-$targetModVersion.jar")
                     }
                     if (matches.size != 1) {
                         throw GradleException(
-                            "Expected one $minecraftVersion $loader $modVersion jar, found ${matches.map { it.name }}"
+                            "Expected one $minecraftVersion $loader $targetModVersion jar, found ${matches.map { it.name }}"
                         )
                     }
 
@@ -868,14 +1175,8 @@ gradle.projectsEvaluated {
                         if (missing.isNotEmpty()) {
                             throw GradleException("${jarFile.name} is missing required entries: $missing")
                         }
-                        val sophisticatedMixin = "salts_inventory_update.sophisticated.mixins.json"
-                        if (minecraftVersion in setOf("1.20.1", "1.21.1", "1.21.11", "26.1.2", "26.2")
-                            && loader in setOf("forge", "neoforge")) {
-                            if (sophisticatedMixin !in entries) {
-                                throw GradleException("${jarFile.name} is missing its Forge/NeoForge Sophisticated mixin configuration")
-                            }
-                        } else if (sophisticatedMixin in entries) {
-                            throw GradleException("${jarFile.name} contains the Forge/NeoForge-only Sophisticated mixin configuration")
+                        if (entries.any { it.contains("/compat/") || it.contains("sophisticated.mixins") }) {
+                            throw GradleException("${jarFile.name} contains compatibility implementation")
                         }
 
                         fun textEntry(name: String): String {
@@ -928,7 +1229,7 @@ gradle.projectsEvaluated {
                         }
                         if (loader == "fabric") {
                             if (!metadata.contains("\"id\": \"salts_inventory_update\"") ||
-                                !metadata.contains("\"version\": \"$modVersion\"") ||
+                                !metadata.contains("\"version\": \"$targetModVersion\"") ||
                                 !metadata.contains("\"license\": \"MIT\"")) {
                                 throw GradleException("${jarFile.name} has incorrect Fabric identity, version, or license metadata")
                             }
@@ -955,7 +1256,7 @@ gradle.projectsEvaluated {
                                 throw GradleException("${jarFile.name} contains Fabric metadata")
                             }
                             if (!metadata.contains("modId = \"salts_inventory_update\"") ||
-                                !metadata.contains("version = \"$modVersion\"") ||
+                                !metadata.contains("version = \"$targetModVersion\"") ||
                                 !metadata.contains("license = \"MIT\"")) {
                                 throw GradleException("${jarFile.name} has incorrect $loader identity, version, or license metadata")
                             }
@@ -1033,3 +1334,7 @@ gradle.projectsEvaluated {
         dependsOn("verifyApiExamples")
     }
 }
+
+apply(from = "gradle/compatibility.gradle")
+apply(from = "gradle/sophisticated-fabric.gradle")
+apply(from = "gradle/controlify.gradle")

@@ -1,5 +1,6 @@
 .gradle/
 build/
+dist/
 !gradle/wrapper/gradle-wrapper.jar
 .kotlin/
 .idea/
@@ -15,3 +16,15 @@ run/
 .vscode/
 /functional-tests/results/backup-*/
 /versions/*/*/logs/
+/compatibility/versions/*/*/logs/
+/tmp/pdfs/
+/output/pdf/
+
+# Local test runs and diagnostic artifacts
+/tmp/
+/logs/
+/controller-workspace-config/
+/hs_err_pid*.log
+/replay_pid*.log
+__pycache__/
+*.py[cod]

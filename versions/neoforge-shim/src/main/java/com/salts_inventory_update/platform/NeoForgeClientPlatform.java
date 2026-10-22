@@ -11,6 +11,8 @@ import com.salts_inventory_update.client.WindowedInventoryClient;
 import com.salts_inventory_update.debug.DesktopDebug;
 
 import net.minecraft.client.KeyMapping;
+import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
+import net.neoforged.neoforge.client.event.RenderGuiLayerEvent;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
 import net.minecraft.client.gui.screens.Screen;
@@ -59,14 +61,64 @@ public final class NeoForgeClientPlatform {
         }
         initialized = true;
 
-        modBus.addListener(KeyBindingHelper::onRegisterKeyMappings);
+        registerResourceReloadListener(modBus);
+        modBus.addListener(NeoForgeClientPlatform::onRegisterKeyMappings);
         modBus.addListener(KeyMappingHelper::onRegisterKeyMappings);
         modBus.addListener(NeoForgeClientPlatform::onClientSetup);
         NeoForge.EVENT_BUS.addListener(ClientTickEvents::onStartClientTick);
         NeoForge.EVENT_BUS.addListener(ClientTickEvents::onEndClientTick);
         NeoForge.EVENT_BUS.addListener(ClientCommandRegistrationCallback.EVENT::onRegisterClientCommands);
         NeoForge.EVENT_BUS.addListener(NeoForgeClientPlatform::onMovementInputUpdate);
+        NeoForge.EVENT_BUS.addListener(NeoForgeClientPlatform::onHudLayer);
         registerConfigScreen();
+    }
+
+    private static void onHudLayer(RenderGuiLayerEvent.Pre event) {
+        if (!WindowedInventoryClient.shouldHideHotbar() || !event.getName().getNamespace().equals("minecraft")) {
+            return;
+        }
+        // Layer identifiers span the legacy XP/jump bars and the newer contextual bar.
+        switch (event.getName().getPath()) {
+            case "hotbar", "player_health", "armor_level", "food_level", "air_level", "vehicle_health",
+                "jump_meter", "experience_bar", "experience_level", "contextual_info_bar_background",
+                "contextual_info_bar", "selected_item_name", "spectator_tooltip" -> event.setCanceled(true);
+            default -> { }
+        }
+    }
+
+    @SuppressWarnings({"rawtypes", "unchecked"})
+    private static void registerResourceReloadListener(IEventBus modBus) {
+        // NeoForge changed the event name and added keyed listeners after 1.21.1.
+        // Register on the mod bus before Minecraft freezes the reload listener list.
+        try {
+            Class eventType;
+            try {
+                eventType = Class.forName("net.neoforged.neoforge.client.event.AddClientReloadListenersEvent");
+            } catch (ClassNotFoundException legacy) {
+                eventType = Class.forName("net.neoforged.neoforge.client.event.RegisterClientReloadListenersEvent");
+            }
+            modBus.addListener(eventType, event -> {
+                net.minecraft.server.packs.resources.ResourceManagerReloadListener listener = manager ->
+                    Minecraft.getInstance().execute(InventoryDesktopScreen::resourcesReloaded);
+                try {
+                    for (Method method : event.getClass().getMethods()) {
+                        if (method.getName().equals("addListener") && method.getParameterCount() == 2) {
+                            method.invoke(event, WindowedInventoryClient.id("desktop_resources"), listener);
+                            return;
+                        }
+                        if (method.getName().equals("registerReloadListener") && method.getParameterCount() == 1) {
+                            method.invoke(event, listener);
+                            return;
+                        }
+                    }
+                    throw new IllegalStateException("Unsupported NeoForge resource reload event " + event.getClass().getName());
+                } catch (ReflectiveOperationException error) {
+                    throw new IllegalStateException("Could not register desktop resource reload listener", error);
+                }
+            });
+        } catch (ClassNotFoundException error) {
+            throw new IllegalStateException("NeoForge client resource reload event is unavailable", error);
+        }
     }
 
     private static void registerConfigScreen() {
@@ -74,6 +126,11 @@ public final class NeoForgeClientPlatform {
             IConfigScreenFactory.class,
             () -> (container, modListScreen) -> WindowedInventoryClient.createConfigScreen(modListScreen)
         );
+    }
+
+    private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
+        WindowedInventoryClient.registerKeyMappings();
+        KeyBindingHelper.onRegisterKeyMappings(event);
     }
 
     private static void onClientSetup(FMLClientSetupEvent event) {

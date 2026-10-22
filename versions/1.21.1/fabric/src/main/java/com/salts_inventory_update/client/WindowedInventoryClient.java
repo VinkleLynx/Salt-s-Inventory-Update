@@ -10,22 +10,23 @@ import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.MouseHandler;
 import net.minecraft.client.Options;
-import com.salts_inventory_update.client.gui.GuiGraphicsExtractor;
+import com.salts_inventory_update.api.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.ChatScreen;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.resources.ResourceLocation;
 import org.lwjgl.glfw.GLFW;
 
 import com.salts_inventory_update.SaltsInventoryUpdate;
+import com.salts_inventory_update.api.client.desktop.DesktopClientApi;
 import com.salts_inventory_update.SaltsInventoryRuntime;
-import com.salts_inventory_update.compat.emi.EmiRecipeBrowserBootstrap;
-import com.salts_inventory_update.compat.toms_storage.client.TomsStorageClientCompat;
 import com.salts_inventory_update.mixin.client.MouseHandlerAccessor;
 
 public final class WindowedInventoryClient {
+    private static final String KEY_CATEGORY = "key.categories.salts_inventory_update";
     private static KeyMapping characterWindowKey;
     private static KeyMapping jeiWindowKey;
     private static KeyMapping mouseFocusKey;
+    private static final MovementControlState movementControl = new MovementControlState();
     private static boolean customMouseGrab;
     private static Field mouseGrabbedField;
     private static Field mouseXposField;
@@ -38,31 +39,8 @@ public final class WindowedInventoryClient {
 
     public static void initialize() {
         SaltsInventoryConfig.load();
-        EmiRecipeBrowserBootstrap.initialize();
-        characterWindowKey = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping(
-                "key.salts_inventory_update.character_window",
-                InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_C,
-                KeyMapping.CATEGORY_INVENTORY
-            )
-        );
-        jeiWindowKey = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping(
-                "key.salts_inventory_update.jei_window",
-                InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_H,
-                KeyMapping.CATEGORY_INVENTORY
-            )
-        );
-        mouseFocusKey = KeyBindingHelper.registerKeyBinding(
-            new KeyMapping(
-                "key.salts_inventory_update.mouse_focus",
-                InputConstants.Type.KEYSYM,
-                GLFW.GLFW_KEY_LEFT_ALT,
-                KeyMapping.CATEGORY_INVENTORY
-            )
-        );
+
+        registerKeyMappings();
 
         com.salts_inventory_update.platform.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents.CLIENT_STARTED.register(client -> {
             DesktopClientResources.install(client);
@@ -72,13 +50,42 @@ public final class WindowedInventoryClient {
                 com.salts_inventory_update.api.integration.DesktopIntegrationContext.Phase.CLIENT);
         });
         InventoryDesktopScreen.registerInternalApiDefinitions();
-        TomsStorageClientCompat.initialize();
+
         InventoryDesktopScreen.registerContainerScreens();
         DesktopContainerClient.initializeNetworking();
         registerClientCommands();
         initializeFunctionalTests();
         ClientTickEvents.START_CLIENT_TICK.register(WindowedInventoryClient::syncDesktopMovementKeys);
         ClientTickEvents.END_CLIENT_TICK.register(WindowedInventoryClient::onClientTick);
+    }
+
+    /** Create bindings before the loader collects them for Minecraft Options. */
+    public static void registerKeyMappings() {
+        if (characterWindowKey != null) return;
+        characterWindowKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.salts_inventory_update.character_window",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_C,
+                KEY_CATEGORY
+            )
+        );
+        jeiWindowKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.salts_inventory_update.jei_window",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_H,
+                KEY_CATEGORY
+            )
+        );
+        mouseFocusKey = KeyBindingHelper.registerKeyBinding(
+            new KeyMapping(
+                "key.salts_inventory_update.mouse_focus",
+                InputConstants.Type.KEYSYM,
+                GLFW.GLFW_KEY_LEFT_ALT,
+                KEY_CATEGORY
+            )
+        );
     }
 
     public static KeyMapping characterWindowKey() {
@@ -91,6 +98,10 @@ public final class WindowedInventoryClient {
 
     public static KeyMapping mouseFocusKey() {
         return mouseFocusKey;
+    }
+
+    public static String inventoryKeyName() {
+        return Minecraft.getInstance().options.keyInventory.getTranslatedKeyMessage().getString();
     }
 
     public static String mouseFocusKeyName() {
@@ -189,10 +200,40 @@ public final class WindowedInventoryClient {
         return false;
     }
 
+    public static void resetMovementControl() {
+        movementControl.reset();
+    }
+
+    private static boolean canControlWindows(Minecraft minecraft) {
+        var host = DesktopClientApi.workspaceHost();
+        return SaltsInventoryRuntime.isEnabled() && minecraft.player != null && minecraft.level != null
+            && minecraft.isWindowActive() && (host == null || !host.enabled())
+            && minecraft.screen instanceof InventoryDesktopScreen desktop
+            && desktop.hasWindows() && !desktop.isTextInputActive();
+    }
+
+    public static void handleMovementKeyAction(Minecraft minecraft, int action, int key, int scancode) {
+        if (mouseFocusKey == null || action != GLFW.GLFW_PRESS || !canControlWindows(minecraft)
+            || !KeyBindingHelper.isKeyModifierActive(mouseFocusKey)) return;
+        if (mouseFocusKey.matches(key, scancode) || mouseFocusKey.isDefault() && (key == GLFW.GLFW_KEY_LEFT_ALT || key == GLFW.GLFW_KEY_RIGHT_ALT)) {
+            movementControl.press(SaltsInventoryConfig.get().toggleMovementControl);
+        }
+    }
+
+    public static boolean handleMovementMouseAction(Minecraft minecraft, int button, int action) {
+        if (mouseFocusKey == null || !canControlWindows(minecraft)
+            || !KeyBindingHelper.isKeyModifierActive(mouseFocusKey)) return false;
+        InputConstants.Key bound = KeyBindingHelper.getBoundKeyOf(mouseFocusKey);
+        if (bound.getType() != InputConstants.Type.MOUSE || bound.getValue() != button) return false;
+        if (action == GLFW.GLFW_PRESS) movementControl.press(SaltsInventoryConfig.get().toggleMovementControl);
+        return true;
+    }
+
     private static void onClientTick(Minecraft minecraft) {
         DesktopContainerClient.tick(minecraft);
         openPendingConfigScreen(minecraft);
         if (!SaltsInventoryRuntime.isEnabled()) {
+            movementControl.reset();
             InventoryKeyHoldController.reset();
             InventoryDesktopScreen.reset(minecraft);
             setCameraMouseGrab(minecraft, false);
@@ -204,6 +245,7 @@ public final class WindowedInventoryClient {
 
         InventoryKeyHoldController.tick(minecraft);
         if (minecraft.player == null || minecraft.level == null) {
+            movementControl.reset();
             InventoryKeyHoldController.reset();
             InventoryDesktopScreen.reset(minecraft);
             setCameraMouseGrab(minecraft, false);
@@ -230,7 +272,8 @@ public final class WindowedInventoryClient {
             boolean mouseFocusDown = isMouseFocusKeyDown(minecraft);
             boolean hasWindows = inventoryScreen.hasWindows();
             boolean desktopActive = hasWindows || inventoryScreen.isHotbarOnly();
-            inventoryScreen.setCameraControl(mouseFocusDown && hasWindows);
+            inventoryScreen.setCameraControl(movementControl.active(mouseFocusDown,
+                SaltsInventoryConfig.get().toggleMovementControl, canControlWindows(minecraft)));
             syncMovementKeys(minecraft, desktopActive && !inventoryScreen.isTextInputActive(), !hasWindows || inventoryScreen.isCameraControlActive());
             setCameraMouseGrab(minecraft, inventoryScreen.isCameraControlActive());
 
@@ -238,8 +281,9 @@ public final class WindowedInventoryClient {
                 inventoryScreen.onClose();
             }
         } else {
+            movementControl.reset();
             setCameraMouseGrab(minecraft, false);
-            InventoryDesktopScreen.tickPassiveGhostWindows(minecraft);
+
             if (screen == null && isMouseFocusKeyDown(minecraft)) {
                 InventoryDesktopScreen.openHotbarOnly(minecraft);
             }
@@ -276,6 +320,10 @@ public final class WindowedInventoryClient {
     }
 
     private static void maybeOpenFirstRunInstructions(Minecraft minecraft) {
+        // An alternative workspace presentation owns its onboarding. Explicit help stays available.
+        if (DesktopClientApi.workspaceHost() != null) {
+            return;
+        }
         if (!SaltsInventoryConfig.get().hasSeenInstructionsWindow) {
             openInstructionsWindow(minecraft);
         }
@@ -292,17 +340,7 @@ public final class WindowedInventoryClient {
         return true;
     }
 
-    public static void extractPassiveGhostWindows(GuiGraphicsExtractor graphics) {
-        if (!SaltsInventoryRuntime.isEnabled()) {
-            return;
-        }
 
-        Minecraft minecraft = Minecraft.getInstance();
-        InventoryDesktopScreen.extractPassiveGhostWindows(minecraft, graphics);
-        if (!(minecraft.screen instanceof InventoryDesktopScreen)) {
-            InventoryKeyHoldController.extractOverlay(minecraft, graphics);
-        }
-    }
 
     public static boolean shouldHideCrosshair() {
         if (!SaltsInventoryRuntime.isEnabled()) {
@@ -321,7 +359,7 @@ public final class WindowedInventoryClient {
         }
 
         Minecraft minecraft = Minecraft.getInstance();
-        return minecraft.screen instanceof InventoryDesktopScreen screen && screen.hasWindows();
+        return minecraft.screen instanceof InventoryDesktopScreen screen && screen.hasWindows() && !screen.isCameraControlActive();
     }
 
     private static void syncDesktopMovementKeys(Minecraft minecraft) {
